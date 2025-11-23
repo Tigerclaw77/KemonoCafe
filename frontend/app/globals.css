@@ -1,0 +1,37 @@
+/* frontend/app/globals.css */
+
+@import "tailwindcss";
+
+/* Base light/dark colors used by the new Tailwind @theme system */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+/* Global body reset + default colors */
+body {
+  margin: 0;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  color: var(--color-foreground);
+  background-color: var(--color-background);
+}
+
+/* Helper class for the café background – used on <main> */
+.bg-cafe-gradient {
+  @apply bg-gradient-to-b from-sky-100 via-sky-50 to-rose-50;
+}

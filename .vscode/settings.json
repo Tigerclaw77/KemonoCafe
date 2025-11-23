@@ -1,0 +1,25 @@
+{
+  "files.exclude": {
+    // Git + build + deps
+    "**/.git": true,
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+
+    // Config / plumbing you rarely touch
+    // "**/next-env.d.ts": true,
+    "**/postcss.config.mjs": true,
+    "**/eslint.config.mjs": true,
+    "**/next.config.ts": true,
+    "**/package-lock.json": true,
+
+    // Optional: hide scaffolding folders until we use them
+    // "**/assets": true,
+    "**/backend": true,
+    // "**/docs": true
+  },
+
+  // Also hide anything ignored by .gitignore
+  // "explorer.excludeGitIgnore": true
+}
