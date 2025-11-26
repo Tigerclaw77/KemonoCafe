@@ -34,13 +34,16 @@ export default function CompanionProfileHero({ companion }: Props) {
           />
         </button>
 
-        {/* Single line: Name – Archetype */}
-        <p className="mt-4 text-lg md:text-xl font-semibold text-slate-50">
+        {/* Single line: Name – Species/Title */}
+        <p className="mt-4 text-lg md:text-xl font-semibold text-slate-900">
           {companion.name}
-          <span className="text-sky-300"> – {companion.title}</span>
+          <span className="ml-1 font-normal text-slate-600">
+            {" "}
+            – {companion.title}
+          </span>
         </p>
 
-        <p className="mt-1 text-[11px] text-slate-400">
+        <p className="mt-1 text-[11px] text-slate-500">
           Click her portrait to see her profile.
         </p>
       </div>

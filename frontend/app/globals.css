@@ -22,6 +22,22 @@
   }
 }
 
+/* Fancy script-style headings for the cafe menu */
+.font-menu-script {
+  /* If you later load Great Vibes or another script font, put it first */
+  font-family:
+    "Great Vibes",
+    "Playfair Display",
+    "Brush Script MT",
+    "Lucida Handwriting",
+    cursive,
+    "Georgia",
+    serif;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  font-size: 2.3rem;
+}
+
 /* Global body reset + default colors */
 body {
   margin: 0;

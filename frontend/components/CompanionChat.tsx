@@ -2,7 +2,14 @@
 
 "use client";
 
-import { useEffect, useRef, useState, KeyboardEvent, FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  KeyboardEvent,
+  FormEvent,
+} from "react";
+import { useRouter } from "next/navigation";
 import type { CompanionConfig } from "../config/companions";
 
 interface Message {
@@ -13,9 +20,18 @@ interface Message {
 
 interface CompanionChatProps {
   companion: CompanionConfig;
+  userId?: string;
 }
 
-export default function CompanionChat({ companion }: CompanionChatProps) {
+const GUEST_FREE_KEY = "kemonoCafe_guest_free_remaining_v1";
+const GUEST_FREE_TOTAL = 6;
+
+export default function CompanionChat({
+  companion,
+  userId,
+}: CompanionChatProps) {
+  const router = useRouter();
+
   const [messages, setMessages] = useState<Message[]>(() => [
     {
       id: "welcome",
@@ -23,71 +39,135 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
       content: `Welcome to Kemono Cafe! I’m ${companion.name}, your hostess today. Please, have a seat—what would you like to talk about? ♡`,
     },
   ]);
+
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [messagesLeft, setMessagesLeft] = useState<number>(0);
+
+  // Logged-in economy state
+  const [remainingMessages, setRemainingMessages] = useState<number | null>(
+    null
+  );
+  const [hasNominationActive, setHasNominationActive] = useState(false);
+  const [nominationExpiresAt, setNominationExpiresAt] = useState<string | null>(
+    null
+  );
+  const [hasDailyFreeAvailable, setHasDailyFreeAvailable] = useState(false);
+  const [dailyFreeRemaining, setDailyFreeRemaining] = useState<number | null>(
+    null
+  );
+
+  // Guest teaser state (no account)
+  const [guestFreeRemaining, setGuestFreeRemaining] = useState<number | null>(
+    null
+  );
+
   const [showLimitWarning, setShowLimitWarning] = useState(false);
   const [hasShownBossLine, setHasShownBossLine] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
 
-  // nomination = premium mode (unlimited until 3AM local)
-  const [hasNominationActive, setHasNominationActive] = useState(false);
-
-  const storageKey = `kemonoCafe_messages_${companion.id}`;
-  const nominationKey = `kemonoCafe_nomination_${companion.id}`; // stores ISO expiry
-
-  // refs for UX
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const isGuest = !userId;
+
+  // ─────────────────────────────────────────
+  // 1) Guest teaser: load free remaining from localStorage
+  // ─────────────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // Message balance
-    const stored = window.localStorage.getItem(storageKey);
+    if (!isGuest) {
+      // Logged-in user, guest teaser not relevant
+      setGuestFreeRemaining(null);
+      return;
+    }
+
+    const stored = window.localStorage.getItem(GUEST_FREE_KEY);
     if (stored === null) {
-      window.localStorage.setItem(storageKey, "5");
-      setMessagesLeft(5);
+      window.localStorage.setItem(GUEST_FREE_KEY, String(GUEST_FREE_TOTAL));
+      setGuestFreeRemaining(GUEST_FREE_TOTAL);
     } else {
-      setMessagesLeft(Number(stored) || 0);
+      const value = Number(stored);
+      setGuestFreeRemaining(Number.isFinite(value) ? value : 0);
     }
+  }, [isGuest]);
 
-    // Nomination: check if we have an unexpired nomination
-    const storedNom = window.localStorage.getItem(nominationKey);
-    if (storedNom) {
-      const expiresAt = new Date(storedNom);
-      if (!Number.isNaN(expiresAt.getTime()) && Date.now() < expiresAt.getTime()) {
-        setHasNominationActive(true);
-      } else {
-        // expired – clear it
-        window.localStorage.removeItem(nominationKey);
-        setHasNominationActive(false);
-      }
-    }
-  }, [storageKey, nominationKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const handler = () => {
-      const stored = window.localStorage.getItem(storageKey);
-      setMessagesLeft(Number(stored || "0"));
-    };
-
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }, [storageKey]);
-
-  const persistMessagesLeft = (value: number) => {
+  const updateGuestFreeRemaining = (value: number) => {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(storageKey, String(value));
+      window.localStorage.setItem(GUEST_FREE_KEY, String(value));
     }
-    setMessagesLeft(value);
+    setGuestFreeRemaining(value);
   };
 
-  // Boss line: only when *not* nominated and they actually hit 0
-  const appendBossLineIfNeeded = (nextBalance: number) => {
+  // ─────────────────────────────────────────
+  // 2) Logged-in: load status from backend
+  // ─────────────────────────────────────────
+  useEffect(() => {
+    if (!userId) {
+      setRemainingMessages(null);
+      setHasNominationActive(false);
+      setNominationExpiresAt(null);
+      setHasDailyFreeAvailable(false);
+      setDailyFreeRemaining(null);
+      return;
+    }
+
+    let aborted = false;
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch("/api/user/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId }),
+        });
+
+        if (!res.ok) {
+          console.error("Failed to load user status");
+          return;
+        }
+
+        const data = await res.json();
+        if (aborted) return;
+
+        setRemainingMessages(
+          typeof data.remainingMessages === "number"
+            ? data.remainingMessages
+            : 0
+        );
+        setHasNominationActive(!!data.hasNomination);
+        setNominationExpiresAt(data.nominationExpiresAt ?? null);
+        setHasDailyFreeAvailable(!!data.hasDailyFreeAvailable);
+        setDailyFreeRemaining(
+          typeof data.dailyFreeRemaining === "number"
+            ? data.dailyFreeRemaining
+            : null
+        );
+      } catch (err) {
+        if (!aborted) {
+          console.error("Status fetch error:", err);
+        }
+      }
+    }
+
+    fetchStatus();
+
+    return () => {
+      aborted = true;
+    };
+  }, [userId]);
+
+  // Scroll chat to bottom on new messages
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [messages.length]);
+
+  // Boss line helper (for logged-in, not nomination)
+  const appendBossLineIfNeeded = () => {
     if (hasNominationActive) return;
-    if (nextBalance > 0 || hasShownBossLine) return;
+    if (hasShownBossLine) return;
 
     const variants = [
       `Oh— the manager is walking by… I should look busy. If you want me to stay at your table, you might have to nominate me or order something from the café. ♡`,
@@ -108,23 +188,13 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
     setShowLimitWarning(true);
   };
 
-  // Keep the chat scrolled to the bottom, but only inside the chat box,
-  // not the whole page.
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    container.scrollTop = container.scrollHeight;
-  }, [messages.length]);
-
+  // ─────────────────────────────────────────
+  // 3) Send message – guest vs logged-in
+  // ─────────────────────────────────────────
   const sendMessage = async () => {
-    if (!input.trim() || isSending) return;
+    setErrorText(null);
 
-    // Only enforce limits if not nominated
-    if (!hasNominationActive && messagesLeft <= 0) {
-      setShowLimitWarning(true);
-      appendBossLineIfNeeded(messagesLeft);
-      return;
-    }
+    if (!input.trim() || isSending) return;
 
     const content = input.trim();
 
@@ -138,31 +208,133 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
     setInput("");
     setIsSending(true);
 
-    const prevBalance = messagesLeft;
-    let nextBalance = messagesLeft;
-
-    // If not in premium mode, consume a message
-    if (!hasNominationActive) {
-      nextBalance = messagesLeft - 1;
-      persistMessagesLeft(nextBalance);
-    }
-
     try {
+      // ── Guest mode ────────────────────────
+      if (isGuest) {
+        const currentGuestFree = guestFreeRemaining ?? 0;
+
+        if (currentGuestFree <= 0) {
+          setErrorText(
+            "Your 6 free sample messages are used up. Create a free account to get 6 messages every day and unlock the full café menu. ♡"
+          );
+          setIsSending(false);
+          return;
+        }
+
+        const res = await fetch(`/api/chat-guest/${companion.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              ...messages.map((m) => ({ role: m.role, content: m.content })),
+              { role: "user", content: userMessage.content },
+            ],
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          console.error("Guest chat API error:", data);
+          const fallback: Message = {
+            id: `assistant-error-${Date.now()}`,
+            role: "assistant",
+            content:
+              "Ah—sorry! The line got a little noisy. Could you try again in a moment, okay? ♡",
+          };
+          setMessages((prev) => [...prev, fallback]);
+          setIsSending(false);
+          return;
+        }
+
+        const replyText: string =
+          data.reply ??
+          "Mmm… I had a little trouble hearing that, could you try again?";
+
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: replyText,
+        };
+
+        const newGuestFree = Math.max(currentGuestFree - 1, 0);
+        updateGuestFreeRemaining(newGuestFree);
+
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        if (newGuestFree <= 0) {
+          setErrorText(
+            "That was your last free sample message. Create a free account to keep chatting and get 6 messages every day. ♡"
+          );
+        }
+
+        return;
+      }
+
+      // ── Logged-in mode ─────────────────────
+      if (!userId) {
+        setErrorText("You need to sign in to chat with her. ♡");
+        setIsSending(false);
+        return;
+      }
+
+      // Soft guard: if we *know* there is no nomination, no bank, and no daily free
+      if (
+        !hasNominationActive &&
+        remainingMessages !== null &&
+        remainingMessages <= 0 &&
+        !hasDailyFreeAvailable
+      ) {
+        setShowLimitWarning(true);
+        appendBossLineIfNeeded();
+        setIsSending(false);
+        return;
+      }
+
       const res = await fetch(`/api/chat/${companion.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          userId,
           messages: [
             ...messages.map((m) => ({ role: m.role, content: m.content })),
             { role: "user", content: userMessage.content },
           ],
-          companionId: companion.id,
         }),
       });
 
-      if (!res.ok) throw new Error("Chat API error");
-
       const data = await res.json();
+
+      if (!res.ok) {
+        console.error("Chat API error:", data);
+
+        if (data?.error === "NO_MESSAGES_LEFT") {
+          setShowLimitWarning(true);
+          setRemainingMessages(0);
+          setHasDailyFreeAvailable(false);
+          setDailyFreeRemaining(0);
+          appendBossLineIfNeeded();
+          setIsSending(false);
+          return;
+        }
+
+        if (data?.error === "UNAUTHENTICATED") {
+          setErrorText("Please sign in to continue chatting. ♡");
+          setIsSending(false);
+          return;
+        }
+
+        const fallback: Message = {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          content:
+            "Ah—sorry! The line got a little noisy. Could you try again in a moment, okay? ♡",
+        };
+        setMessages((prev) => [...prev, fallback]);
+        setIsSending(false);
+        return;
+      }
+
       const replyText: string =
         data.reply ??
         "Mmm… I had a little trouble hearing that, could you try again?";
@@ -173,11 +345,32 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
         content: replyText,
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      const newRemaining =
+        typeof data.remainingMessages === "number"
+          ? data.remainingMessages
+          : remainingMessages ?? 0;
+      const newHasNomination =
+        typeof data.hasNomination === "boolean"
+          ? data.hasNomination
+          : hasNominationActive;
+      const newHasDailyFree =
+        typeof data.hasDailyFreeAvailable === "boolean"
+          ? data.hasDailyFreeAvailable
+          : hasDailyFreeAvailable;
+      const newDailyFreeRemaining =
+        typeof data.dailyFreeRemaining === "number"
+          ? data.dailyFreeRemaining
+          : dailyFreeRemaining;
 
-      // If this reply brought us to 0 and we're not nominated, add the boss line as a free extra
-      if (!hasNominationActive) {
-        appendBossLineIfNeeded(nextBalance);
+      setMessages((prev) => [...prev, assistantMessage]);
+      setRemainingMessages(newRemaining);
+      setHasNominationActive(newHasNomination);
+      setNominationExpiresAt(data.nominationExpiresAt ?? nominationExpiresAt);
+      setHasDailyFreeAvailable(newHasDailyFree);
+      setDailyFreeRemaining(newDailyFreeRemaining);
+
+      if (!newHasNomination && newRemaining <= 0 && !newHasDailyFree) {
+        appendBossLineIfNeeded();
       }
     } catch (err) {
       console.error(err);
@@ -188,13 +381,8 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
           "Ah—sorry! The line got a little noisy. Could you try again in a moment, okay? ♡",
       };
       setMessages((prev) => [...prev, fallback]);
-      // refund on error if we consumed a message
-      if (!hasNominationActive) {
-        persistMessagesLeft(prevBalance);
-      }
     } finally {
       setIsSending(false);
-      // keep the input focused after send
       if (textareaRef.current) {
         textareaRef.current.focus();
       }
@@ -216,7 +404,12 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
   };
 
   const handleNominate = () => {
-    if (typeof window === "undefined") return;
+    if (!userId) {
+      alert(
+        "Create a free account first so we can remember your nomination and message balance. ♡"
+      );
+      return;
+    }
 
     if (hasNominationActive) {
       alert(
@@ -225,26 +418,93 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
       return;
     }
 
-    // Compute next 3AM local
-    const now = new Date();
-    const expires = new Date(now);
-    expires.setHours(3, 0, 0, 0);
-    if (now >= expires) {
-      // if it's past 3AM already, use next day
-      expires.setDate(expires.getDate() + 1);
+    router.push("/menu");
+  };
+
+  const nominationLabel = (() => {
+    if (!hasNominationActive) return null;
+    if (!nominationExpiresAt) return "Unlimited chat active";
+
+    const dt = new Date(nominationExpiresAt);
+    if (Number.isNaN(dt.getTime())) return "Unlimited chat active";
+
+    const hours = dt.getHours().toString().padStart(2, "0");
+    const mins = dt.getMinutes().toString().padStart(2, "0");
+    return `Unlimited chat until ${hours}:${mins}`;
+  })();
+
+  const headerStatusText = (() => {
+    if (isGuest) {
+      if (guestFreeRemaining === null) return "Loading...";
+      if (guestFreeRemaining > 0) {
+        return `${guestFreeRemaining} free sample message${
+          guestFreeRemaining === 1 ? "" : "s"
+        } left`;
+      }
+      return "Create a free account to keep chatting";
     }
 
-    window.localStorage.setItem(nominationKey, expires.toISOString());
-    setHasNominationActive(true);
-    setShowLimitWarning(false);
+    if (!userId) return "Sign in to start chatting";
 
-    const nominationMessage: Message = {
-      id: `nomination-${Date.now()}`,
-      role: "assistant",
-      content: `Ehehe… you made *me* your nomination for tonight? That means we can talk as much as we want until the café closes at 3:00 AM. I’ll stay right here with you. ♡`,
-    };
-    setMessages((prev) => [...prev, nominationMessage]);
-  };
+    if (hasNominationActive) {
+      return nominationLabel ?? "Unlimited chat active";
+    }
+
+    if (remainingMessages !== null && remainingMessages > 0) {
+      return `${remainingMessages} message${
+        remainingMessages === 1 ? "" : "s"
+      } left`;
+    }
+
+    if (hasDailyFreeAvailable) {
+      if (dailyFreeRemaining !== null) {
+        return `${dailyFreeRemaining} free message${
+          dailyFreeRemaining === 1 ? "" : "s"
+        } available today`;
+      }
+      return "Free messages available today";
+    }
+
+    return "No messages left";
+  })();
+
+  const inputPlaceholder = (() => {
+    if (isGuest) {
+      if (guestFreeRemaining !== null && guestFreeRemaining <= 0) {
+        return `You’ve used your 6 free sample messages. Create a free account to keep chatting and get 6 messages every day.`;
+      }
+      return `Talk to ${companion.name}… (you have free sample messages)`;
+    }
+
+    if (!userId) {
+      return `Sign in to talk to ${companion.name}…`;
+    }
+
+    if (hasNominationActive) {
+      return `Talk to ${companion.name} as long as you like...`;
+    }
+
+    if (
+      remainingMessages !== null &&
+      remainingMessages <= 0 &&
+      !hasDailyFreeAvailable
+    ) {
+      return `You’re out of messages. Nominate her or order from the café menu to keep chatting.`;
+    }
+
+    return `Talk to ${companion.name}...`;
+  })();
+
+  const inputDisabled = isGuest
+    ? isSending ||
+      guestFreeRemaining === null ||
+      guestFreeRemaining <= 0
+    : isSending ||
+      !userId ||
+      (!hasNominationActive &&
+        remainingMessages !== null &&
+        remainingMessages <= 0 &&
+        !hasDailyFreeAvailable);
 
   return (
     <div className="w-full rounded-2xl border border-sky-100 bg-white/95 backdrop-blur-sm shadow-sm flex flex-col h-[440px] md:h-[470px]">
@@ -259,13 +519,9 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 border border-sky-100 text-[11px] text-slate-600">
+          <span className="inline-flex items-center gap-1 rounded-full bg_WHITE px-3 py-1 border border-sky-100 text-[11px] text-slate-600">
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            {hasNominationActive
-              ? "Unlimited chat until 3:00 AM"
-              : `${messagesLeft} message${
-                  messagesLeft === 1 ? "" : "s"
-                } left`}
+            {headerStatusText}
           </span>
           <button
             type="button"
@@ -276,12 +532,16 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
               ? "Nominated (premium mode active)"
               : `Nominate ${companion.name} (unlimited until 3 AM)`}
           </button>
-          {!hasNominationActive && showLimitWarning && messagesLeft <= 0 && (
-            <p className="text-[10px] text-pink-600 text-right">
-              You&apos;re out of messages. Nominate her or order from the café
-              menu to keep chatting. ♡
-            </p>
-          )}
+          {!isGuest &&
+            !hasNominationActive &&
+            showLimitWarning &&
+            (remainingMessages ?? 0) <= 0 &&
+            !hasDailyFreeAvailable && (
+              <p className="text-[10px] text-pink-600 text-right">
+                You&apos;re out of messages. Nominate her or order from the café
+                menu to keep chatting. ♡
+              </p>
+            )}
         </div>
       </div>
 
@@ -307,30 +567,26 @@ export default function CompanionChat({ companion }: CompanionChatProps) {
           onKeyDown={handleKeyDown}
           rows={2}
           className="w-full text-sm rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-sky-300 focus:border-sky-300 resize-none text-slate-800 placeholder:text-slate-400"
-          placeholder={
-            hasNominationActive
-              ? `Talk to ${companion.name} as long as you like...`
-              : messagesLeft > 0
-              ? `Talk to ${companion.name}...`
-              : `You’re out of messages. Nominate her or order from the café menu to keep chatting.`
-          }
-          disabled={isSending || (!hasNominationActive && messagesLeft <= 0)}
+          placeholder={inputPlaceholder}
+          disabled={inputDisabled}
         />
         <div className="flex items-center justify-between">
           <p className="text-[10px] text-slate-400">
-            Without nomination, each message uses 1 point. Nominations and café
-            items keep the conversation going.
+            Guests get 6 free sample messages. Create a free account to get 6
+            messages every day, save your balance, and nominate your favorite
+            girl.
           </p>
           <button
             type="submit"
-            disabled={
-              isSending || !input.trim() || (!hasNominationActive && messagesLeft <= 0)
-            }
+            disabled={inputDisabled || !input.trim()}
             className="inline-flex items-center justify-center rounded-full bg-pink-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pink-600 transition-colors"
           >
             {isSending ? "Sending…" : "Send"}
           </button>
         </div>
+        {errorText && (
+          <p className="mt-1 text-[10px] text-pink-600">{errorText}</p>
+        )}
       </form>
     </div>
   );

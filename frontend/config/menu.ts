@@ -1,204 +1,248 @@
 // frontend/config/menu.ts
 
-export type MenuCategory = 'drink' | 'snack' | 'entree' | 'dessert' | 'full_course';
+export type MenuCategory =
+  | "drink"
+  | "snack"
+  | "entree"
+  | "dessert"
+  | "full_course";
 
 export interface MenuItem {
   id: string;
   category: MenuCategory;
   name: string;
   messages: number;
-  priceCents: number; // placeholder, Stripe later
+  priceCents: number;
+  description?: string;
+  vegan?: boolean;
 }
 
-export const menuItems: MenuItem[] = [
-  // DRINKS (+10)
+// You can tweak priceCents later; these are just sane placeholders.
+export const MENU_ITEMS: MenuItem[] = [
+  // DRINKS — +10 messages
   {
-    id: 'drink_coffee',
-    category: 'drink',
-    name: 'Coffee',
+    id: "coffee",
+    category: "drink",
+    name: "Coffee",
     messages: 10,
     priceCents: 199,
+    description: "Freshly brewed, bold and aromatic.",
+    // vegan depends on milk choice, so leave undefined
   },
   {
-    id: 'drink_cola',
-    category: 'drink',
-    name: 'Cola',
+    id: "cola",
+    category: "drink",
+    name: "Cola",
     messages: 10,
     priceCents: 199,
+    description: "Classic cola served ice-cold.",
+    vegan: true,
   },
   {
-    id: 'drink_matcha',
-    category: 'drink',
-    name: 'Matcha Latte',
+    id: "matcha",
+    category: "drink",
+    name: "Matcha",
     messages: 10,
     priceCents: 199,
+    description: "Stone-ground matcha whisked to a smooth froth.",
   },
   {
-    id: 'drink_latte',
-    category: 'drink',
-    name: 'Cafe Latte',
+    id: "latte",
+    category: "drink",
+    name: "Latte",
     messages: 10,
     priceCents: 199,
+    description: "Rich espresso blended with steamed milk.",
   },
   {
-    id: 'drink_apple_juice',
-    category: 'drink',
-    name: 'Apple Juice',
+    id: "apple_juice",
+    category: "drink",
+    name: "Apple Juice",
     messages: 10,
     priceCents: 199,
+    description: "Crisp, refreshing juice from sweet apples.",
+    vegan: true,
   },
   {
-    id: 'drink_melon_soda',
-    category: 'drink',
-    name: 'Melon Soda',
+    id: "melon_soda",
+    category: "drink",
+    name: "Melon Soda",
     messages: 10,
     priceCents: 199,
+    description: "Light, fizzy melon soda with a sweet finish.",
+    vegan: true,
   },
 
-  // SNACKS (+20)
+  // SNACKS — +20 messages
   {
-    id: 'snack_onigiri',
-    category: 'snack',
-    name: 'Onigiri',
+    id: "onigiri",
+    category: "snack",
+    name: "Onigiri",
     messages: 20,
     priceCents: 349,
+    description: "Hand-pressed rice ball with a savory filling.",
   },
   {
-    id: 'snack_edamame',
-    category: 'snack',
-    name: 'Edamame',
+    id: "edamame",
+    category: "snack",
+    name: "Edamame",
     messages: 20,
     priceCents: 349,
+    description: "Steamed young soybeans sprinkled with sea salt.",
+    vegan: true,
   },
   {
-    id: 'snack_gyoza',
-    category: 'snack',
-    name: 'Gyoza',
+    id: "gyoza",
+    category: "snack",
+    name: "Gyoza",
     messages: 20,
     priceCents: 349,
+    description: "Pan-fried dumplings with a juicy filling.",
   },
   {
-    id: 'snack_dango',
-    category: 'snack',
-    name: 'Dango',
+    id: "dango",
+    category: "snack",
+    name: "Dango",
     messages: 20,
     priceCents: 349,
+    description: "Sweet rice dumpling trio glazed in syrup.",
   },
   {
-    id: 'snack_fries',
-    category: 'snack',
-    name: 'French Fries',
+    id: "fries",
+    category: "snack",
+    name: "French Fries",
     messages: 20,
     priceCents: 349,
+    description: "Crispy golden fries with light seasoning.",
+    vegan: true,
   },
   {
-    id: 'snack_inari',
-    category: 'snack',
-    name: 'Inari-zushi',
+    id: "inari_zushi",
+    category: "snack",
+    name: "Inari-Zushi",
     messages: 20,
     priceCents: 349,
+    description: "Sweet tofu pockets filled with seasoned rice.",
+    vegan: true,
   },
 
-  // ENTREES (+40)
+  // ENTREES — +40 messages
   {
-    id: 'entree_omurice',
-    category: 'entree',
-    name: 'Omurice',
+    id: "club_sandwich",
+    category: "entree",
+    name: "Club Sandwich",
     messages: 40,
     priceCents: 599,
+    description: "Toasted triple-stack sandwich with fresh greens and sauce.",
   },
   {
-    id: 'entree_egg_sandwich',
-    category: 'entree',
-    name: 'Egg Sandwich',
+    id: "egg_sandwich",
+    category: "entree",
+    name: "Egg Sandwich",
     messages: 40,
     priceCents: 599,
+    description: "Soft scrambled eggs on warm toasted bread.",
   },
   {
-    id: 'entree_carbonara',
-    category: 'entree',
-    name: 'Creamy Carbonara',
+    id: "carbonara",
+    category: "entree",
+    name: "Carbonara",
     messages: 40,
     priceCents: 599,
+    description: "Creamy pasta tossed with parmesan and pepper.",
   },
   {
-    id: 'entree_spaghetti',
-    category: 'entree',
-    name: 'Spaghetti Napolitan',
+    id: "spaghetti",
+    category: "entree",
+    name: "Spaghetti",
     messages: 40,
     priceCents: 599,
+    description: "Tomato-simmered spaghetti with herbs and olive oil.",
   },
   {
-    id: 'entree_katsudon',
-    category: 'entree',
-    name: 'Katsudon',
+    id: "katsudon",
+    category: "entree",
+    name: "Katsudon",
     messages: 40,
     priceCents: 599,
+    description: "Crispy cutlet simmered with onions over rice.",
   },
   {
-    id: 'entree_vegan_curry',
-    category: 'entree',
-    name: 'Vegan Curry',
+    id: "vegan_entree",
+    category: "entree",
+    name: "Vegan Entrée",
     messages: 40,
     priceCents: 599,
+    description: "Hearty plant-based dish with seasonal ingredients.",
+    vegan: true,
   },
 
-  // DESSERTS (+30)
+  // DESSERTS — +30 messages
   {
-    id: 'dessert_parfait',
-    category: 'dessert',
-    name: 'Parfait',
+    id: "ice_cream_float",
+    category: "dessert",
+    name: "Ice Cream Float",
     messages: 30,
     priceCents: 449,
+    description: "Creamy vanilla ice cream over fizzy soda.",
   },
   {
-    id: 'dessert_cake',
-    category: 'dessert',
-    name: 'Cake Slice',
+    id: "cake",
+    category: "dessert",
+    name: "Cake Slice",
     messages: 30,
     priceCents: 449,
+    description: "Light, moist cake with whipped cream frosting.",
   },
   {
-    id: 'dessert_tart',
-    category: 'dessert',
-    name: 'Fruit Tart',
+    id: "fruit_tart",
+    category: "dessert",
+    name: "Fruit Tart",
     messages: 30,
     priceCents: 449,
+    description: "Seasonal fruit layered over a crisp tart shell.",
   },
   {
-    id: 'dessert_banana_split',
-    category: 'dessert',
-    name: 'Banana Split',
+    id: "vegan_berry_parfait",
+    category: "dessert",
+    name: "Vegan Berry Parfait",
     messages: 30,
     priceCents: 449,
+    description: "Layers of berries, cream, and crunch, dairy-free.",
+    vegan: true,
   },
   {
-    id: 'dessert_crepe',
-    category: 'dessert',
-    name: 'Crepe',
+    id: "crepe",
+    category: "dessert",
+    name: "Crepe",
     messages: 30,
     priceCents: 449,
+    description: "Warm crepe filled with cream and fruit.",
   },
   {
-    id: 'dessert_cheesecake',
-    category: 'dessert',
-    name: 'Cheesecake',
+    id: "cheesecake",
+    category: "dessert",
+    name: "Cheesecake",
     messages: 30,
     priceCents: 449,
+    description: "Rich, smooth cheesecake with a delicate crust.",
   },
 
-  // FULL COURSE (+100)
+  // FULL COURSE — combo placeholder (used for price / description only)
   {
-    id: 'full_course_set',
-    category: 'full_course',
-    name: 'Full Course',
-    messages: 100,
-    priceCents: 1199,
+    id: "kemono_full_course",
+    category: "full_course",
+    name: "Kemono Full Course",
+    messages: 110, // ~10% bonus
+    priceCents: 1399, // discount compared to $15.96
+    description:
+      "A complete Kemono Café experience!",
   },
 ];
 
-export function groupMenuByCategory() {
-  const categories: Record<MenuCategory, MenuItem[]> = {
+// Helper used by CafeMenuButton / menu UI
+export function groupMenuByCategory(): Record<MenuCategory, MenuItem[]> {
+  const grouped: Record<MenuCategory, MenuItem[]> = {
     drink: [],
     snack: [],
     entree: [],
@@ -206,9 +250,9 @@ export function groupMenuByCategory() {
     full_course: [],
   };
 
-  for (const item of menuItems) {
-    categories[item.category].push(item);
+  for (const item of MENU_ITEMS) {
+    grouped[item.category].push(item);
   }
 
-  return categories;
+  return grouped;
 }

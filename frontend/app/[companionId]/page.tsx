@@ -67,6 +67,9 @@ export default async function CompanionPage({ params }: CompanionPageProps) {
     return notFound();
   }
 
+  // 🔐 TODO: replace this with real auth user id (e.g. from Supabase)
+  const userId = "demo-user-1";
+
   return (
     <main className="min-h-screen bg-cafe-gradient flex flex-col">
       {/* Top bar */}
@@ -105,14 +108,15 @@ export default async function CompanionPage({ params }: CompanionPageProps) {
           {/* Big portrait + single-line label + profile modal trigger */}
           <CompanionProfileHero companion={companion} />
 
-          {/* Chat card */}
-          <CompanionChat companion={companion} />
+          {/* Chat card (now aware of userId for backend stats / balance) */}
+          <CompanionChat companion={companion} userId={userId} />
 
-          {/* Café menu button */}
+          {/* Café menu button (Stripe-backed) */}
           <div className="w-full flex justify-end">
             <CafeMenuButton
               companionId={companion.id}
               companionName={companion.name}
+              userId={userId}
             />
           </div>
         </div>
