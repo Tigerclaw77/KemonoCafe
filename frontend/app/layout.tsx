@@ -1,6 +1,5 @@
 // frontend/app/layout.tsx
 import type { Metadata } from "next";
-// @ts-expect-error: CSS side-effect import is handled by Next.js
 import "./globals.css";
 import { geistSans, geistMono } from "../lib/fonts";
 
