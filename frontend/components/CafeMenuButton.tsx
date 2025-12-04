@@ -4,6 +4,7 @@
 import { useState, useMemo } from "react";
 import { groupMenuByCategory } from "../config/menu";
 import MenuItemCard from "./MenuItemCard";
+import { parisienne } from "../lib/fonts";
 
 interface CafeMenuButtonProps {
   companionId: string;
@@ -86,8 +87,7 @@ export default function CafeMenuButton({
       const dessertPrice =
         cart.find((i) => i.itemType === "dessert")?.priceCents ?? 0;
 
-      const baseSetPrice =
-        drinkPrice + snackPrice + entreePrice + dessertPrice;
+      const baseSetPrice = drinkPrice + snackPrice + entreePrice + dessertPrice;
 
       if (baseSetPrice > fullCourse.priceCents) {
         fullCourseDiscountCents = baseSetPrice - fullCourse.priceCents;
@@ -142,7 +142,8 @@ export default function CafeMenuButton({
       const hasEntree = (counts.entree ?? 0) > 0;
       const hasDessert = (counts.dessert ?? 0) > 0;
 
-      const fullCourseEligible = hasDrink && hasSnack && hasEntree && hasDessert;
+      const fullCourseEligible =
+        hasDrink && hasSnack && hasEntree && hasDessert;
 
       const items = Object.entries(counts)
         .filter(([, qty]) => (qty ?? 0) > 0)
@@ -193,15 +194,17 @@ export default function CafeMenuButton({
             {/* Header */}
             <header className="relative px-6 py-4 border-b border-slate-200">
               <div className="text-center">
-                <p className="text-[10px] tracking-[0.2em] uppercase text-slate-500">
+                {/* <p className="text-[10px] tracking-[0.2em] uppercase text-slate-500">
                   Kemono Cafe
-                </p>
-                <h2 className="mt-1 text-lg font-menu-script text-slate-900">
+                </p> */}
+                <h1
+                  className={`${parisienne.className} text-[2.4rem] leading-none text-slate-900`}
+                >
                   Kemono Cafe Menu
-                </h2>
-                <p className="mt-1 text-[11px] text-slate-600">
+                </h1>
+                {/* <p className="mt-1 text-[11px] text-slate-600">
                   Choose a few favorites, then check out once.
-                </p>
+                </p> */}
               </div>
               <button
                 type="button"
@@ -219,10 +222,10 @@ export default function CafeMenuButton({
                 {fullCourse && (
                   <section className="rounded-2xl border border-slate-300 bg-white/80 px-4 py-3 shadow-sm">
                     <div className="flex justify-center items-baseline gap-2">
-                      <h3 className="font-menu-script text-sm text-slate-900">
-                        Kemono Full Course
-                      </h3>
-                      <span className="text-[11px] text-slate-700 font-semibold">
+                      <h2 className="text-[1.9rem] font-[Marcellus] text-slate-900 tracking-wider">
+                        Full Course Special
+                      </h2>
+                      <span className="ml-4 text-base font-[Playfair_Display] text-slate-600 tracking-wide">
                         ${(fullCourse.priceCents / 100).toFixed(2)}
                       </span>
                     </div>
@@ -232,7 +235,8 @@ export default function CafeMenuButton({
                     <p className="mt-1 text-[10px] text-slate-500">
                       When you include at least one drink, snack, entrée, and
                       dessert, we treat it as a Full Course and can apply a
-                      small discount and bonus messages.
+                      small discount and bonus messages (when purchased
+                      together).
                     </p>
                   </section>
                 )}
@@ -262,7 +266,10 @@ export default function CafeMenuButton({
                       : undefined;
 
                   return (
-                    <section key={key} className="pt-2 border-t border-slate-200">
+                    <section
+                      key={key}
+                      className="pt-2 border-t border-slate-200"
+                    >
                       <div className="flex justify-center items-baseline gap-2">
                         <h3 className="font-menu-section text-slate-900">
                           {label}
@@ -365,9 +372,7 @@ export default function CafeMenuButton({
                       <span>Full Course discount</span>
                       <span>
                         -$
-                        {(
-                          cartSummary.fullCourseDiscountCents / 100
-                        ).toFixed(2)}
+                        {(cartSummary.fullCourseDiscountCents / 100).toFixed(2)}
                       </span>
                     </div>
                   )}

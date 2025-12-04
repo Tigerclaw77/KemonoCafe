@@ -186,7 +186,7 @@ export default function AuthPage() {
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
                 placeholder="What should the girls call you?"
               />
             </div>
@@ -201,7 +201,7 @@ export default function AuthPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
               placeholder="you@example.com"
             />
           </div>

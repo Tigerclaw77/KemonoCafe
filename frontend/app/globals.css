@@ -51,3 +51,9 @@ body {
 .bg-cafe-gradient {
   @apply bg-gradient-to-b from-sky-100 via-sky-50 to-rose-50;
 }
+
+.menu-frame {
+  border: 18px solid transparent;
+  border-image: url("/menu-frame.png") 60 round;
+}
+

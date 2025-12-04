@@ -1,5 +1,4 @@
 // frontend/components/CompanionChat.tsx
-
 "use client";
 
 import {
@@ -278,13 +277,16 @@ export default function CompanionChat({
         return;
       }
 
-      // Soft guard: if we *know* there is no nomination, no bank, and no daily free
-      if (
-        !hasNominationActive &&
-        remainingMessages !== null &&
-        remainingMessages <= 0 &&
-        !hasDailyFreeAvailable
-      ) {
+      // Combine banked + daily free to decide if we’re out
+      const banked = remainingMessages ?? 0;
+      const free =
+        hasDailyFreeAvailable && dailyFreeRemaining !== null
+          ? dailyFreeRemaining
+          : 0;
+      const effectiveRemaining = banked + free;
+
+      // Soft guard: no nomination and no effective remaining
+      if (!hasNominationActive && effectiveRemaining <= 0) {
         setShowLimitWarning(true);
         appendBossLineIfNeeded();
         setIsSending(false);
@@ -369,7 +371,14 @@ export default function CompanionChat({
       setHasDailyFreeAvailable(newHasDailyFree);
       setDailyFreeRemaining(newDailyFreeRemaining);
 
-      if (!newHasNomination && newRemaining <= 0 && !newHasDailyFree) {
+      const updatedBanked = newRemaining;
+      const updatedFree =
+        newHasDailyFree && newDailyFreeRemaining !== null
+          ? newDailyFreeRemaining
+          : 0;
+      const updatedEffective = updatedBanked + updatedFree;
+
+      if (!newHasNomination && updatedEffective <= 0) {
         appendBossLineIfNeeded();
       }
     } catch (err) {
@@ -450,19 +459,15 @@ export default function CompanionChat({
       return nominationLabel ?? "Unlimited chat active";
     }
 
-    if (remainingMessages !== null && remainingMessages > 0) {
-      return `${remainingMessages} message${
-        remainingMessages === 1 ? "" : "s"
-      } left`;
-    }
+    const banked = remainingMessages ?? 0;
+    const free =
+      hasDailyFreeAvailable && dailyFreeRemaining !== null
+        ? dailyFreeRemaining
+        : 0;
+    const effective = banked + free;
 
-    if (hasDailyFreeAvailable) {
-      if (dailyFreeRemaining !== null) {
-        return `${dailyFreeRemaining} free message${
-          dailyFreeRemaining === 1 ? "" : "s"
-        } available today`;
-      }
-      return "Free messages available today";
+    if (effective > 0) {
+      return `${effective} message${effective === 1 ? "" : "s"} left today`;
     }
 
     return "No messages left";
@@ -484,27 +489,31 @@ export default function CompanionChat({
       return `Talk to ${companion.name} as long as you like...`;
     }
 
-    if (
-      remainingMessages !== null &&
-      remainingMessages <= 0 &&
-      !hasDailyFreeAvailable
-    ) {
+    const banked = remainingMessages ?? 0;
+    const free =
+      hasDailyFreeAvailable && dailyFreeRemaining !== null
+        ? dailyFreeRemaining
+        : 0;
+    const effective = banked + free;
+
+    if (effective <= 0) {
       return `You’re out of messages. Nominate her or order from the café menu to keep chatting.`;
     }
 
     return `Talk to ${companion.name}...`;
   })();
 
+  const loggedInEffectiveRemaining =
+    (remainingMessages ?? 0) +
+    (hasDailyFreeAvailable && dailyFreeRemaining !== null
+      ? dailyFreeRemaining
+      : 0);
+
   const inputDisabled = isGuest
-    ? isSending ||
-      guestFreeRemaining === null ||
-      guestFreeRemaining <= 0
+    ? isSending || guestFreeRemaining === null || guestFreeRemaining <= 0
     : isSending ||
       !userId ||
-      (!hasNominationActive &&
-        remainingMessages !== null &&
-        remainingMessages <= 0 &&
-        !hasDailyFreeAvailable);
+      (!hasNominationActive && loggedInEffectiveRemaining <= 0);
 
   return (
     <div className="w-full rounded-2xl border border-sky-100 bg-white/95 backdrop-blur-sm shadow-sm flex flex-col h-[440px] md:h-[470px]">
@@ -535,8 +544,7 @@ export default function CompanionChat({
           {!isGuest &&
             !hasNominationActive &&
             showLimitWarning &&
-            (remainingMessages ?? 0) <= 0 &&
-            !hasDailyFreeAvailable && (
+            loggedInEffectiveRemaining <= 0 && (
               <p className="text-[10px] text-pink-600 text-right">
                 You&apos;re out of messages. Nominate her or order from the café
                 menu to keep chatting. ♡
