@@ -9,7 +9,7 @@ import { parisienne } from "../lib/fonts";
 interface CafeMenuButtonProps {
   companionId: string;
   companionName: string; // not used in copy for now
-  userId: string;
+  userId?: string;
 }
 
 type MenuCategoryKey = "drink" | "snack" | "entree" | "dessert" | "full_course";
@@ -24,7 +24,7 @@ type CartEntry = {
 
 export default function CafeMenuButton({
   companionId,
-  companionName,
+  // companionName,
   userId,
 }: CafeMenuButtonProps) {
   const [open, setOpen] = useState(false);

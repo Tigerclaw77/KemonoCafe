@@ -12,7 +12,7 @@ interface MenuItemCardProps {
   description?: string;
   vegan?: boolean;
   companionId: string;
-  userId: string;
+  userId?: string;
   onAddToCart: (item: {
     itemId: string;
     itemType: ItemType;

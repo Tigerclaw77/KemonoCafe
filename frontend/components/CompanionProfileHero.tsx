@@ -22,7 +22,7 @@ export default function CompanionProfileHero({ companion }: Props) {
           onClick={() => setOpen(true)}
           aria-label={`View profile for ${companion.name}`}
           title={`View profile for ${companion.name}`}
-          className="relative w-56 h-56 md:w-72 md:h-72 rounded-[32px] overflow-hidden ring-4 ring-sky-300 shadow-2xl 
+          className="relative w-56 h-56 md:w-72 md:h-72 rounded-4xl overflow-hidden ring-4 ring-sky-300 shadow-2xl 
                      transition-transform duration-200 hover:scale-[1.03] focus:outline-none focus:ring-4 focus:ring-pink-300"
         >
           <Image

@@ -1,17 +1,15 @@
 // frontend/app/[companionId]/page.tsx
-
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import Image from "next/image";
+
+import ChatHeader from "../../components/ChatHeader";
+import CompanionChat from "../../components/CompanionChat";
+import CafeMenuButton from "../../components/CafeMenuButton";
+import CompanionProfileHero from "../../components/CompanionProfileHero";
 
 import {
   getCompanionById,
   type CompanionConfig,
 } from "../../config/companions";
-
-import CompanionChat from "../../components/CompanionChat";
-import CafeMenuButton from "../../components/CafeMenuButton";
-import CompanionProfileHero from "../../components/CompanionProfileHero";
 
 // Unified character config (all 13 girls)
 import {
@@ -67,51 +65,21 @@ export default async function CompanionPage({ params }: CompanionPageProps) {
     return notFound();
   }
 
-  // 🔐 TODO: replace this with real auth user id (e.g. from Supabase)
-  const userId = "demo-user-1";
+  // 🔐 Auth wiring:
+  // - For guest testing, leave this as `undefined`.
+  // - When Supabase auth is hooked up, replace with the real user id.
+  const userId: string | undefined = undefined;
 
   return (
     <main className="min-h-screen bg-cafe-gradient flex flex-col">
       {/* Top bar */}
-      <header className="w-full border-b border-sky-100 bg-slate-900/60 backdrop-blur-sm">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="relative w-9 h-9 rounded-full overflow-hidden ring-2 ring-sky-300">
-              <Image
-                src={companion.avatarSrc}
-                alt={companion.name}
-                fill
-                className="object-cover object-[50%_25%]"
-              />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-slate-50">
-                Kemono Cafe
-              </p>
-              <p className="text-[11px] text-slate-400">
-                Chat with your chosen hostess
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/"
-            className="text-[11px] text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
-          >
-            ← Choose another hostess
-          </Link>
-        </div>
-      </header>
+      <ChatHeader companion={companion} />
 
-      {/* Main content */}
       <section className="flex-1">
         <div className="max-w-3xl mx-auto px-4 pb-10 flex flex-col items-center gap-6">
-          {/* Big portrait + single-line label + profile modal trigger */}
           <CompanionProfileHero companion={companion} />
-
-          {/* Chat card (now aware of userId for backend stats / balance) */}
           <CompanionChat companion={companion} userId={userId} />
 
-          {/* Café menu button (Stripe-backed) */}
           <div className="w-full flex justify-end">
             <CafeMenuButton
               companionId={companion.id}

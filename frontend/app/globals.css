@@ -49,7 +49,7 @@ body {
 
 /* Helper class for the café background – used on <main> */
 .bg-cafe-gradient {
-  @apply bg-gradient-to-b from-sky-100 via-sky-50 to-rose-50;
+  @apply bg-linear-to-b from-sky-100 via-sky-50 to-rose-50;
 }
 
 .menu-frame {

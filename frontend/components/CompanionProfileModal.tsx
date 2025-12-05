@@ -17,8 +17,16 @@ export default function CompanionProfileModal({ companion, onClose }: Props) {
     .filter(Boolean);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-md max-h-[70vh] rounded-2xl bg-slate-900/95 text-slate-50 shadow-2xl overflow-hidden flex flex-col">
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4"
+      onClick={onClose} // click on backdrop closes modal
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="w-full max-w-md max-h-[70vh] rounded-2xl bg-slate-900/95 text-slate-50 shadow-2xl overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()} // prevent backdrop close when clicking inside
+      >
         {/* Header */}
         <header className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
           <div>

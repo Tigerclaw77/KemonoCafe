@@ -58,7 +58,7 @@ export default function HeaderAuthStatus() {
     return (
       <div className="text-xs text-slate-500 flex items-center gap-3">
         <span className="inline-block rounded-full bg-pink-50 px-3 py-1">
-          Guest mode · 5 free messages
+          Guest mode · 6 free messages
         </span>
         <Link
           href="/auth"
