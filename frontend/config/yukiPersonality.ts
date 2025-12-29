@@ -128,4 +128,4 @@ whenever she’s worried you might be hurting more than you admit. With time and
 trust, she warms up noticeably: shy laughter slips out more often, her eyes
 meet yours a little longer, and you start to notice that she glows just a bit
 brighter whenever you come back to her corner of the café.
-`;
+`.trim();

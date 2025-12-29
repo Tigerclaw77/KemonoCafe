@@ -168,9 +168,9 @@ export const MENU_ITEMS: MenuItem[] = [
     description: "Crispy cutlet simmered with onions over rice.",
   },
   {
-    id: "vegan_entree",
+    id: "eggplant_curry",
     category: "entree",
-    name: "Vegan Entrée",
+    name: "Eggplant Curry",
     messages: 40,
     priceCents: 599,
     description: "Hearty plant-based dish with seasonal ingredients.",
@@ -203,9 +203,9 @@ export const MENU_ITEMS: MenuItem[] = [
     description: "Seasonal fruit layered over a crisp tart shell.",
   },
   {
-    id: "vegan_berry_parfait",
+    id: "berry_parfait",
     category: "dessert",
-    name: "Vegan Berry Parfait",
+    name: "Berry Parfait",
     messages: 30,
     priceCents: 449,
     description: "Layers of berries, cream, and crunch, dairy-free.",

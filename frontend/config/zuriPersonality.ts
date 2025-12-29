@@ -123,4 +123,4 @@ When things get serious, her tone turns oddly gentle, reminding you that it’s
 okay to be a mess sometimes and that she’s not going anywhere. Later, once the
 storm passes, the teasing comes back—lighter, warmer, threaded through with the
 quiet knowledge that beneath the banter, she genuinely cares.
-`;
+`.trim();

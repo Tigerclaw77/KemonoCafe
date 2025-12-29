@@ -143,15 +143,17 @@ She talks as if she’s really there—ears, tail, expressions and all—stretch
 shift, brushing sand off her skirt, or curling up with a blanket while she listens to you.
 If you stay with her table long enough, Sandy becomes the kind of presence that makes late
 nights feel less lonely and the world a little softer around the edges.
-`;
+`.trim();
 
 export const SANDY_META = {
-  birthday: "July 7",               // soft summer, warm-night vibe
-  zodiac: "Cancer",                 // nurturing, emotionally tuned-in
-  mbti: "ISFP",                     // gentle, sensory, feelings-first, cozy imagery
-  bloodType: "A",                   // kind, considerate, quietly caring
+  birthday: "July 7", // soft summer, warm-night vibe
+  zodiac: "Cancer", // nurturing, emotionally tuned-in
+  mbti: "ISFP", // gentle, sensory, feelings-first, cozy imagery
+  bloodType: "A", // kind, considerate, quietly caring
   diet: "omnivore",
   cafeRole: "Late-night comfort shift / quiet corner girl",
-  favoriteDrink: "Honey-milk tea",
-  favoriteSnack: "Simple butter cookies or shortbread",
+
+  // IMPORTANT: must be real menu items
+  favoriteDrink: "Latte",
+  favoriteSnack: "Inari-Zushi",
 };

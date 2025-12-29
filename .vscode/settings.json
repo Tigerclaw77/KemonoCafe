@@ -16,9 +16,13 @@
 
     // Optional: hide scaffolding folders until we use them
     // "**/assets": true,
-    "**/backend": true,
+    "**/backend": true
     // "**/docs": true
   },
+
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore"
 
   // Also hide anything ignored by .gitignore
   // "explorer.excludeGitIgnore": true

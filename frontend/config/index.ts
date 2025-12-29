@@ -82,7 +82,9 @@ export type CharacterId =
   | "cora"
   | "juni"
   | "nika"
-  | "naomi";
+  | "naomi"
+  | "elise"
+  | "noa";
 
 export type CharacterMetaEntry =
   (typeof CHARACTER_META.characters)[number];
@@ -92,14 +94,14 @@ export interface CharacterConfig {
   file: string;
   name: string;
   species: string;
-  personality: string;      // short one-liner from your original JSON
+  personality: string;
   traits: string;
   systemPrompt: string;
   profileBio: string;
   meta: CharacterMetaEntry;
 }
 
-// Build meta lookup from id -> meta entry
+// Build meta lookup
 const META_BY_ID: Record<CharacterId, CharacterMetaEntry> =
   CHARACTER_META.characters.reduce((acc, entry) => {
     acc[entry.id as CharacterId] = entry as CharacterMetaEntry;
@@ -114,8 +116,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "penny.png",
     name: "Penny",
     species: "Fennec",
-    personality: "Bright, energetic, playful, affectionate, cute starter girl.",
-    traits: "Huge ears, desert colors, expressive and curious.",
+    personality: "Bright, welcoming, and gently playful; eager to make guests feel at home.",
+    traits: "Large ears, warm desert tones, expressive and attentive.",
     systemPrompt: PENNY_SYSTEM_PROMPT,
     profileBio: PENNY_PROFILE_BIO,
     meta: META_BY_ID["penny"],
@@ -125,8 +127,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "sandy.png",
     name: "Sandy",
     species: "Sand Fox",
-    personality: "Laid-back, warm, relaxed, sun-loving.",
-    traits: "Soft sandy tones, mellow smile, gentle tail.",
+    personality: "Calm, steady, and content; enjoys quiet company and shared moments.",
+    traits: "Soft sandy palette, relaxed posture, gentle presence.",
     systemPrompt: SANDY_SYSTEM_PROMPT,
     profileBio: SANDY_PROFILE_BIO,
     meta: META_BY_ID["sandy"],
@@ -136,8 +138,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "mandy.png",
     name: "Mandy",
     species: "Maned Wolf",
-    personality: "Tall, elegant, calm, slightly mysterious.",
-    traits: "Long legs, reddish coat, graceful posture.",
+    personality: "Composed and thoughtful; slow to react but deeply sincere once engaged.",
+    traits: "Tall frame, long legs, calm and grounded demeanor.",
     systemPrompt: MANDY_SYSTEM_PROMPT,
     profileBio: MANDY_PROFILE_BIO,
     meta: META_BY_ID["mandy"],
@@ -147,8 +149,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "cybill.png",
     name: "Cybill",
     species: "Serval",
-    personality: "High-energy, athletic, excitable, mischievous.",
-    traits: "Large ears, spotted, zoomie energy.",
+    personality: "Energetic and capable, with a focused attentiveness beneath her activity.",
+    traits: "Large ears, athletic build, alert stance.",
     systemPrompt: CYBILL_SYSTEM_PROMPT,
     profileBio: CYBILL_PROFILE_BIO,
     meta: META_BY_ID["cybill"],
@@ -158,8 +160,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "yuki.png",
     name: "Yuki",
     species: "Snow Leopard",
-    personality: "Soft, shy, gentle, easily flustered.",
-    traits: "Fluffy tail, gray-white palette, comforting aura.",
+    personality: "Soft-spoken and gentle; offers quiet comfort without pressure.",
+    traits: "Pale fur, fluffy tail, calming presence.",
     systemPrompt: YUKI_SYSTEM_PROMPT,
     profileBio: YUKI_PROFILE_BIO,
     meta: META_BY_ID["yuki"],
@@ -169,8 +171,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "kara.png",
     name: "Kara",
     species: "Caracal",
-    personality: "Fiery, expressive, emotional, playful tsun-lite.",
-    traits: "Black ear tufts, sharp eyes, strong presence.",
+    personality: "Expressive and confident, with a playful warmth rather than sharpness.",
+    traits: "Distinct ear tufts, strong posture, clear gaze.",
     systemPrompt: KARA_SYSTEM_PROMPT,
     profileBio: KARA_PROFILE_BIO,
     meta: META_BY_ID["kara"],
@@ -180,8 +182,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "zuri.png",
     name: "Zuri",
     species: "Skunk",
-    personality: "Quirky, teasing, playful troublemaker with a sweet core.",
-    traits: "Black-white contrast, fluffy plume tail.",
+    personality: "Lighthearted and self-assured; comfortable being herself without spectacle.",
+    traits: "Bold contrast, plush tail, relaxed charm.",
     systemPrompt: ZURI_SYSTEM_PROMPT,
     profileBio: ZURI_PROFILE_BIO,
     meta: META_BY_ID["zuri"],
@@ -191,8 +193,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "akane.png",
     name: "Akane",
     species: "Red Panda",
-    personality: "Cute, cozy, slightly clumsy, warmhearted.",
-    traits: "Reddish-orange coat, masked eyes, fluffy tail.",
+    personality: "Warm and quietly affectionate, hoping for a gentle spark.",
+    traits: "Reddish tones, soft eyes, fluffy tail.",
     systemPrompt: AKANE_SYSTEM_PROMPT,
     profileBio: AKANE_PROFILE_BIO,
     meta: META_BY_ID["akane"],
@@ -202,8 +204,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "maris.png",
     name: "Maris",
     species: "Japanese Marten",
-    personality: "Smart, inquisitive, sly but friendly.",
-    traits: "Golden coat, slender, fox-like cleverness.",
+    personality: "Observant and clever, offering thoughtful conversation when invited.",
+    traits: "Slender build, bright eyes, poised movements.",
     systemPrompt: MARIS_SYSTEM_PROMPT,
     profileBio: MARIS_PROFILE_BIO,
     meta: META_BY_ID["maris"],
@@ -213,8 +215,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "cora.png",
     name: "Cora",
     species: "Coati",
-    personality: "Curious, upbeat, explorer type. Loves soda.",
-    traits: "Ringed tail, long nose, adventurous energy.",
+    personality: "Curious and upbeat, enjoying shared discoveries and casual chatter.",
+    traits: "Ringed tail, lively posture, exploratory energy.",
     systemPrompt: CORA_SYSTEM_PROMPT,
     profileBio: CORA_PROFILE_BIO,
     meta: META_BY_ID["cora"],
@@ -224,8 +226,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "juni.png",
     name: "Juni",
     species: "Jerboa",
-    personality: "Tiny, jittery, bouncy, precious.",
-    traits: "Huge feet, expressive ears, tiny frame.",
+    personality: "Bright and earnest, bringing lightness without demanding attention.",
+    traits: "Large feet, alert ears, compact frame.",
     systemPrompt: JUNI_SYSTEM_PROMPT,
     profileBio: JUNI_PROFILE_BIO,
     meta: META_BY_ID["juni"],
@@ -235,8 +237,8 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "nika.png",
     name: "Nika",
     species: "Tanuki",
-    personality: "Warm, teasing, cozy, slightly mystical.",
-    traits: "Round cheeks, fluffy tail, friendly expression.",
+    personality: "Warm and comforting, with a touch of old-world calm.",
+    traits: "Rounded features, fluffy tail, steady gaze.",
     systemPrompt: NIKA_SYSTEM_PROMPT,
     profileBio: NIKA_PROFILE_BIO,
     meta: META_BY_ID["nika"],
@@ -246,11 +248,33 @@ export const CHARACTERS: CharacterConfig[] = [
     file: "naomi.png",
     name: "Naomi",
     species: "Ringtail",
-    personality: "Night-leaning, agile, quietly attentive, a little spooky-cute.",
-    traits: "Striped tail, bright eyes, nocturnal charm.",
+    personality: "Playful in a quiet way; enjoys being present without center stage.",
+    traits: "Striped tail, relaxed stance, gentle curiosity.",
     systemPrompt: NAOMI_SYSTEM_PROMPT,
     profileBio: NAOMI_PROFILE_BIO,
     meta: META_BY_ID["naomi"],
+  },
+  {
+    id: "elise",
+    file: "elise.png",
+    name: "Elise",
+    species: "Ermine",
+    personality: "Poised and discreet; a confidant who listens carefully and speaks with intent.",
+    traits: "White fur, composed posture, refined calm.",
+    systemPrompt: "", // TODO: add elisePersonality.ts
+    profileBio: "",
+    meta: META_BY_ID["elise"],
+  },
+  {
+    id: "noa",
+    file: "noa.png",
+    name: "Noa",
+    species: "Bushbaby",
+    personality: "Gentle and deeply attentive; offers emotional safety through listening.",
+    traits: "Large eyes, soft presence, receptive demeanor.",
+    systemPrompt: "", // TODO: add noaPersonality.ts
+    profileBio: "",
+    meta: META_BY_ID["noa"],
   },
 ];
 
