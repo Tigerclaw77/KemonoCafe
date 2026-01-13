@@ -16,7 +16,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// SERVER-ONLY SUPABASE (service role)
+// SERVER-ONLY SUPABASE
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -78,39 +78,34 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json(
-        { error: "Companion not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
     }
 
-    const body = await req.json();
-    const messages = body.messages as ChatMessage[] | undefined;
-    const authUserId = body.userId as string | undefined;
+    const body = (await req.json()) as {
+      messages?: ChatMessage[];
+      userId?: string;
+    };
 
-    if (!Array.isArray(messages)) {
+    if (!Array.isArray(body.messages)) {
       return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
     }
 
-    if (!authUserId || !isUuid(authUserId)) {
+    if (!body.userId || !isUuid(body.userId)) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
 
     // ─────────────────────────────────────────────
-    // Resolve auth → app user (HARD REQUIREMENT)
+    // Resolve auth → app user
     // ─────────────────────────────────────────────
 
-    const { data: userRow, error: userErr } = await supabase
+    const { data: userRow } = await supabase
       .from("users")
       .select("id")
-      .eq("auth_user_id", authUserId)
-      .single();
+      .eq("auth_user_id", body.userId)
+      .maybeSingle();
 
-    if (userErr || !userRow) {
-      return NextResponse.json(
-        { error: "USER_NOT_SYNCED" },
-        { status: 401 }
-      );
+    if (!userRow) {
+      return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
     }
 
     const appUserId = userRow.id;
@@ -132,18 +127,13 @@ export async function POST(
     let nominationJustEnded = false;
 
     if (companionRow?.nomination_expires_at) {
-      const expiresMs = new Date(
-        companionRow.nomination_expires_at
-      ).getTime();
+      const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
       const graceEndMs = expiresMs + GRACE_MS;
       const nowMs = now.getTime();
 
       if (nowMs <= expiresMs) {
         unlimited = true;
-      } else if (
-        !companionRow.nomination_grace_used &&
-        nowMs <= graceEndMs
-      ) {
+      } else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
         unlimited = true;
         nominationJustEnded = true;
 
@@ -155,23 +145,7 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // Ensure user_stats EXISTS (critical fix)
-    // ─────────────────────────────────────────────
-
-    await supabase
-      .from("user_stats")
-      .upsert(
-        {
-          user_id: appUserId,
-          daily_free_date: today,
-          daily_free_used: 0,
-          last_visit_at: now.toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
-
-    // ─────────────────────────────────────────────
-    // Load balances (single source of truth)
+    // SINGLE SOURCE OF TRUTH
     // ─────────────────────────────────────────────
 
     const [{ data: balanceRow }, { data: statsRow }] = await Promise.all([
@@ -183,10 +157,22 @@ export async function POST(
 
       supabase
         .from("user_stats")
+        .upsert(
+          {
+            user_id: appUserId,
+            daily_free_date: today,
+            daily_free_used: 0,
+            last_visit_at: now.toISOString(),
+          },
+          { onConflict: "user_id" }
+        )
         .select("daily_free_date, daily_free_used")
-        .eq("user_id", appUserId)
         .single(),
     ]);
+
+    if (!statsRow) {
+      throw new Error("user_stats missing");
+    }
 
     const banked = balanceRow?.remaining_messages ?? 0;
 
@@ -204,7 +190,7 @@ export async function POST(
     // Decide consumption
     // ─────────────────────────────────────────────
 
-    let consume: "FREE" | "BANKED" | "UNLIMITED";
+    let consume: "UNLIMITED" | "FREE" | "BANKED";
 
     if (unlimited) {
       consume = "UNLIMITED";
@@ -213,10 +199,7 @@ export async function POST(
     } else if (banked > 0) {
       consume = "BANKED";
     } else {
-      return NextResponse.json(
-        { error: "NO_MESSAGES_LEFT" },
-        { status: 402 }
-      );
+      return NextResponse.json({ error: "NO_MESSAGES_LEFT" }, { status: 402 });
     }
 
     // ─────────────────────────────────────────────
@@ -230,7 +213,7 @@ export async function POST(
       messages: [
         { role: "system", content: buildMenuContext() },
         { role: "system", content: companion.systemPrompt },
-        ...messages,
+        ...body.messages,
       ],
     });
 
@@ -239,7 +222,7 @@ export async function POST(
       "Mmm… I had trouble hearing that.";
 
     // ─────────────────────────────────────────────
-    // Persist consumption (ONLY HERE)
+    // Persist consumption (ONLY PLACE)
     // ─────────────────────────────────────────────
 
     if (consume === "FREE") {
@@ -276,9 +259,6 @@ export async function POST(
     });
   } catch (err) {
     console.error("Chat route error:", err);
-    return NextResponse.json(
-      { error: "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
