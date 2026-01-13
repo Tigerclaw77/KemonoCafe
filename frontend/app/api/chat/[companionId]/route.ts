@@ -16,7 +16,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Server-only Supabase
+// SERVER-ONLY SUPABASE
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -35,14 +35,10 @@ const GRACE_MS = 5 * 60_000;
 // ─────────────────────────────────────────────
 
 function isUuid(value: string): boolean {
-  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-    value
-  );
+  return /^[0-9a-fA-F-]{36}$/.test(value);
 }
 
-function mapCharacterToCompanion(
-  character: CharacterConfig
-): CompanionConfig {
+function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
@@ -86,9 +82,10 @@ export async function POST(
       );
     }
 
-    const body = await req.json();
-    const messages = body.messages as ChatMessage[] | undefined;
-    const authUserId = body.userId as string | undefined;
+    const { messages, userId: authUserId } = (await req.json()) as {
+      messages?: ChatMessage[];
+      userId?: string;
+    };
 
     if (!Array.isArray(messages)) {
       return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
@@ -99,20 +96,17 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // Resolve auth user → app user (HARD REQUIREMENT)
+    // Resolve auth → app user (HARD REQUIREMENT)
     // ─────────────────────────────────────────────
 
-    const { data: userRow, error: userErr } = await supabase
+    const { data: userRow } = await supabase
       .from("users")
       .select("id")
       .eq("auth_user_id", authUserId)
       .single();
 
-    if (userErr || !userRow) {
-      return NextResponse.json(
-        { error: "USER_NOT_SYNCED" },
-        { status: 401 }
-      );
+    if (!userRow) {
+      return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
     }
 
     const appUserId = userRow.id;
@@ -134,18 +128,13 @@ export async function POST(
     let nominationJustEnded = false;
 
     if (companionRow?.nomination_expires_at) {
-      const expiresMs = new Date(
-        companionRow.nomination_expires_at
-      ).getTime();
+      const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
       const graceEndMs = expiresMs + GRACE_MS;
       const nowMs = now.getTime();
 
       if (nowMs <= expiresMs) {
         unlimited = true;
-      } else if (
-        !companionRow.nomination_grace_used &&
-        nowMs <= graceEndMs
-      ) {
+      } else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
         unlimited = true;
         nominationJustEnded = true;
 
@@ -157,38 +146,47 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // Load balances (SINGLE SOURCE OF TRUTH)
+    // SINGLE SOURCE OF TRUTH (balances + stats)
     // ─────────────────────────────────────────────
 
-    const { data: balanceRow } = await supabase
-      .from("message_balances")
-      .select("remaining_messages")
-      .eq("user_id", appUserId)
-      .maybeSingle();
+    const [{ data: balanceRow }, { data: statsRow }] = await Promise.all([
+      supabase
+        .from("message_balances")
+        .select("remaining_messages")
+        .eq("user_id", appUserId)
+        .maybeSingle(),
 
-    let banked = balanceRow?.remaining_messages ?? 0;
+      supabase
+        .from("user_stats")
+        .upsert(
+          {
+            user_id: appUserId,
+            daily_free_date: today,
+            daily_free_used: 0,
+            last_visit_at: now.toISOString(),
+          },
+          { onConflict: "user_id" }
+        )
+        .select("daily_free_date, daily_free_used")
+        .single(),
+    ]);
 
-    const { data: statsRow } = await supabase
-      .from("user_stats")
-      .select("daily_free_date, daily_free_used")
-      .eq("user_id", appUserId)
-      .maybeSingle();
+    if (!statsRow) {
+      throw new Error("user_stats upsert failed");
+    }
 
-    let dailyFreeUsed =
-      statsRow?.daily_free_date === today
-        ? statsRow.daily_free_used ?? 0
-        : 0;
+    const banked = balanceRow?.remaining_messages ?? 0;
 
-    let dailyFreeRemaining = Math.max(
-      DAILY_FREE_LIMIT - dailyFreeUsed,
-      0
-    );
+    const dailyFreeUsed =
+      statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
+
+    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
 
     // ─────────────────────────────────────────────
-    // Message allowance decision
+    // Decide consumption
     // ─────────────────────────────────────────────
 
-    let consume: "FREE" | "BANKED" | "UNLIMITED" | null = null;
+    let consume: "FREE" | "BANKED" | "UNLIMITED";
 
     if (unlimited) {
       consume = "UNLIMITED";
@@ -197,10 +195,7 @@ export async function POST(
     } else if (banked > 0) {
       consume = "BANKED";
     } else {
-      return NextResponse.json(
-        { error: "NO_MESSAGES_LEFT" },
-        { status: 402 }
-      );
+      return NextResponse.json({ error: "NO_MESSAGES_LEFT" }, { status: 402 });
     }
 
     // ─────────────────────────────────────────────
@@ -213,10 +208,7 @@ export async function POST(
       max_tokens: 140,
       messages: [
         { role: "system", content: buildMenuContext() },
-        {
-          role: "system",
-          content: companion.systemPrompt,
-        },
+        { role: "system", content: companion.systemPrompt },
         ...messages,
       ],
     });
@@ -226,7 +218,7 @@ export async function POST(
       "Mmm… I had trouble hearing that.";
 
     // ─────────────────────────────────────────────
-    // Persist consumption (NO DERIVED STATE)
+    // Persist consumption (ONLY HERE)
     // ─────────────────────────────────────────────
 
     if (consume === "FREE") {
@@ -239,29 +231,23 @@ export async function POST(
         })
         .eq("user_id", appUserId);
 
-      dailyFreeUsed += 1;
+      dailyFreeRemaining -= 1;
     }
 
     if (consume === "BANKED") {
-      banked = Math.max(banked - 1, 0);
-
       await supabase
         .from("message_balances")
         .update({
-          remaining_messages: banked,
+          remaining_messages: Math.max(banked - 1, 0),
           updated_at: now.toISOString(),
         })
         .eq("user_id", appUserId);
     }
 
-    dailyFreeRemaining = Math.max(
-      DAILY_FREE_LIMIT - dailyFreeUsed,
-      0
-    );
-
     return NextResponse.json({
       reply,
-      remainingMessages: banked,
+      remainingMessages:
+        consume === "BANKED" ? Math.max(banked - 1, 0) : banked,
       hasNomination: unlimited,
       nominationJustEnded,
       hasDailyFreeAvailable: dailyFreeRemaining > 0,
@@ -269,9 +255,6 @@ export async function POST(
     });
   } catch (err) {
     console.error("Chat route error:", err);
-    return NextResponse.json(
-      { error: "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
