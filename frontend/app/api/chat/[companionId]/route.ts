@@ -149,30 +149,37 @@ export async function POST(
     // SINGLE SOURCE OF TRUTH
     // ─────────────────────────────────────────────
 
-    const [{ data: balanceRow }, { data: statsRow }] = await Promise.all([
+    const [{ data: balanceRow }, upsertResult] = await Promise.all([
       supabase
         .from("message_balances")
         .select("remaining_messages")
         .eq("user_id", appUserId)
         .maybeSingle(),
 
-      supabase
-        .from("user_stats")
-        .upsert(
-          {
-            user_id: appUserId,
-            daily_free_date: today,
-            daily_free_used: 0,
-            last_visit_at: now.toISOString(),
-          },
-          { onConflict: "user_id" }
-        )
-        .select("daily_free_date, daily_free_used")
-        .single(),
+      // write-only upsert (do NOT depend on return value)
+      supabase.from("user_stats").upsert(
+        {
+          user_id: appUserId,
+          daily_free_date: today,
+          daily_free_used: 0,
+          last_visit_at: now.toISOString(),
+        },
+        { onConflict: "user_id" }
+      ),
     ]);
 
+    // guaranteed read
+    const { data: statsRow } = await supabase
+      .from("user_stats")
+      .select("daily_free_date, daily_free_used")
+      .eq("user_id", appUserId)
+      .single();
+
     if (!statsRow) {
-      throw new Error("user_stats missing");
+      return NextResponse.json(
+        { error: "USER_STATS_NOT_FOUND" },
+        { status: 500 }
+      );
     }
 
     const banked = balanceRow?.remaining_messages ?? 0;
