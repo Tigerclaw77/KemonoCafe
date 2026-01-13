@@ -36,21 +36,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const now = new Date();
-    const nowMs = now.getTime();
-    const todayStr = now.toISOString().slice(0, 10);
+    const now = Date.now();
 
     // ─────────────────────────────────────
-    // 🔑 Resolve APP user ID from auth user ID
+    // Resolve AUTH → APP user
     // ─────────────────────────────────────
 
-    const { data: userRow, error: userErr } = await supabase
+    const { data: userRow } = await supabase
       .from("users")
       .select("id")
       .eq("auth_user_id", authUserId)
-      .single();
+      .maybeSingle();
 
-    if (userErr || !userRow) {
+    if (!userRow) {
       return NextResponse.json({
         remainingMessages: 0,
         hasNomination: false,
@@ -64,7 +62,7 @@ export async function POST(req: NextRequest) {
     const appUserId = userRow.id;
 
     // ─────────────────────────────────────
-    // 1) Banked messages (AUTHORITATIVE)
+    // Banked messages (AUTHORITATIVE)
     // ─────────────────────────────────────
 
     const { data: balance } = await supabase
@@ -76,28 +74,16 @@ export async function POST(req: NextRequest) {
     const remainingMessages = balance?.remaining_messages ?? 0;
 
     // ─────────────────────────────────────
-    // 2) Daily free messages
+    // Daily free messages (AUTHORITATIVE)
     // ─────────────────────────────────────
 
     const { data: stats } = await supabase
       .from("user_stats")
-      .select("daily_free_date, daily_free_used")
+      .select("daily_free_used")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    if (!stats) {
-      await supabase.from("user_stats").insert({
-        user_id: appUserId,
-        daily_free_date: todayStr,
-        daily_free_used: 0,
-        total_messages: 0,
-        last_visit_at: now.toISOString(),
-      });
-    }
-
-    const dailyFreeUsed =
-      stats?.daily_free_date === todayStr ? stats.daily_free_used ?? 0 : 0;
-
+    const dailyFreeUsed = stats?.daily_free_used ?? 0;
     const dailyFreeRemaining = Math.max(
       DAILY_FREE_LIMIT - dailyFreeUsed,
       0
@@ -106,7 +92,7 @@ export async function POST(req: NextRequest) {
     const hasDailyFreeAvailable = dailyFreeRemaining > 0;
 
     // ─────────────────────────────────────
-    // 3) Nomination (AUTHORITATIVE)
+    // Nomination (AUTHORITATIVE)
     // ─────────────────────────────────────
 
     const { data: companionRow } = await supabase
@@ -126,14 +112,14 @@ export async function POST(req: NextRequest) {
 
       const graceEndMs = expiresMs + GRACE_MS;
 
-      if (nowMs <= expiresMs) {
+      if (now <= expiresMs) {
         hasNomination = true;
         nominationExpiresAt = companionRow.nomination_expires_at;
         nominationGraceEndsAt = new Date(graceEndMs).toISOString();
       } else if (
         !companionRow.nomination_grace_used &&
-        nowMs > expiresMs &&
-        nowMs <= graceEndMs
+        now > expiresMs &&
+        now <= graceEndMs
       ) {
         hasNomination = true;
         nominationExpiresAt = companionRow.nomination_expires_at;
@@ -141,16 +127,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.log(
-      "[user/status]",
+    console.log("[user/status]", {
       appUserId,
-      "banked:",
       remainingMessages,
-      "dailyFree:",
       dailyFreeRemaining,
-      "nomination:",
-      hasNomination
-    );
+      hasNomination,
+    });
 
     return NextResponse.json({
       remainingMessages,

@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { buildMenuContext } from "../../../../config/menu";
-
 import {
   getCompanionById,
   type CompanionConfig,
 } from "../../../../config/companions";
-
 import {
   CHARACTERS_BY_ID,
   type CharacterId,
@@ -18,8 +16,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Service-role Supabase (server only)
-const serviceSupabase = createClient(
+// Server-only Supabase
+const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
@@ -42,7 +40,9 @@ function isUuid(value: string): boolean {
   );
 }
 
-function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
+function mapCharacterToCompanion(
+  character: CharacterConfig
+): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
@@ -57,71 +57,14 @@ function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
   };
 }
 
-function resolveCompanion(companionId: string): CompanionConfig | null {
+function resolveCompanion(id: string): CompanionConfig | null {
   return (
-    getCompanionById(companionId) ??
+    getCompanionById(id) ??
     (() => {
-      const c = CHARACTERS_BY_ID[companionId as CharacterId];
+      const c = CHARACTERS_BY_ID[id as CharacterId];
       return c ? mapCharacterToCompanion(c) : null;
     })()
   );
-}
-
-// ─────────────────────────────────────────────
-// MVP MEMORY HELPERS
-// ─────────────────────────────────────────────
-
-function extractMemoryCandidate(userMessage: string) {
-  const triggers = [
-    "i prefer",
-    "i usually",
-    "i like",
-    "i love",
-    "i don't like",
-    "i hate",
-    "i am not into",
-    "i always",
-  ];
-
-  const normalized = userMessage.toLowerCase();
-  if (!triggers.some((t) => normalized.includes(t))) return null;
-
-  return {
-    memory_type: "preference" as const,
-    content: `User ${userMessage.trim()}`,
-    importance: 0.8,
-  };
-}
-
-async function loadMemories(appUserId: string, companionId: string) {
-  const { data } = await serviceSupabase
-    .from("companion_memories")
-    .select("content")
-    .eq("user_id", appUserId)
-    .eq("companion_id", companionId)
-    .order("importance", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(5);
-
-  return data?.map((m) => m.content) ?? [];
-}
-
-async function saveMemory(
-  appUserId: string,
-  companionId: string,
-  memory: {
-    memory_type: "fact" | "preference" | "boundary";
-    content: string;
-    importance: number;
-  }
-) {
-  await serviceSupabase.from("companion_memories").insert({
-    user_id: appUserId,
-    companion_id: companionId,
-    memory_type: memory.memory_type,
-    content: memory.content,
-    importance: memory.importance,
-  });
 }
 
 // ─────────────────────────────────────────────
@@ -156,16 +99,16 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // 🔑 Resolve AUTH user → APP user
+    // Resolve auth user → app user (HARD REQUIREMENT)
     // ─────────────────────────────────────────────
 
-    const { data: userRow } = await serviceSupabase
+    const { data: userRow, error: userErr } = await supabase
       .from("users")
       .select("id")
       .eq("auth_user_id", authUserId)
-      .maybeSingle();
+      .single();
 
-    if (!userRow) {
+    if (userErr || !userRow) {
       return NextResponse.json(
         { error: "USER_NOT_SYNCED" },
         { status: 401 }
@@ -173,56 +116,40 @@ export async function POST(
     }
 
     const appUserId = userRow.id;
-
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
     // ─────────────────────────────────────────────
-    // Load memories
+    // Nomination (authoritative)
     // ─────────────────────────────────────────────
 
-    const memories = await loadMemories(appUserId, companionId);
-
-    const memoryBlock =
-      memories.length > 0
-        ? `\nKnown facts about the user:\n${memories
-            .map((m) => `- ${m}`)
-            .join("\n")}\n`
-        : "";
-
-    // ─────────────────────────────────────────────
-    // Nomination state
-    // ─────────────────────────────────────────────
-
-    const { data: companionRow } = await serviceSupabase
+    const { data: companionRow } = await supabase
       .from("companions")
       .select("id, nomination_expires_at, nomination_grace_used")
       .eq("user_id", appUserId)
       .eq("character_id", companionId)
       .maybeSingle();
 
-    const nominationExpiresAt = companionRow?.nomination_expires_at
-      ? new Date(companionRow.nomination_expires_at)
-      : null;
-
-    const graceUsed = companionRow?.nomination_grace_used === true;
-
-    let unlimitedActive = false;
+    let unlimited = false;
     let nominationJustEnded = false;
 
-    if (nominationExpiresAt && now <= nominationExpiresAt) {
-      unlimitedActive = true;
-    } else if (
-      nominationExpiresAt &&
-      !graceUsed &&
-      now > nominationExpiresAt &&
-      now <= new Date(nominationExpiresAt.getTime() + GRACE_MS)
-    ) {
-      unlimitedActive = true;
-      nominationJustEnded = true;
+    if (companionRow?.nomination_expires_at) {
+      const expiresMs = new Date(
+        companionRow.nomination_expires_at
+      ).getTime();
+      const graceEndMs = expiresMs + GRACE_MS;
+      const nowMs = now.getTime();
 
-      if (companionRow?.id) {
-        await serviceSupabase
+      if (nowMs <= expiresMs) {
+        unlimited = true;
+      } else if (
+        !companionRow.nomination_grace_used &&
+        nowMs <= graceEndMs
+      ) {
+        unlimited = true;
+        nominationJustEnded = true;
+
+        await supabase
           .from("companions")
           .update({ nomination_grace_used: true })
           .eq("id", companionRow.id);
@@ -230,61 +157,54 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // Load balances
+    // Load balances (SINGLE SOURCE OF TRUTH)
     // ─────────────────────────────────────────────
 
-    const { data: balanceRow } = await serviceSupabase
+    const { data: balanceRow } = await supabase
       .from("message_balances")
       .select("remaining_messages")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    let remainingMessages = balanceRow?.remaining_messages ?? 0;
+    let banked = balanceRow?.remaining_messages ?? 0;
 
-    let { data: stats } = await serviceSupabase
+    const { data: statsRow } = await supabase
       .from("user_stats")
-      .select("total_messages, daily_free_date, daily_free_used")
+      .select("daily_free_date, daily_free_used")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    if (!stats) {
-      await serviceSupabase.from("user_stats").insert({
-        user_id: appUserId,
-        total_messages: 0,
-        daily_free_date: today,
-        daily_free_used: 0,
-        last_visit_at: now.toISOString(),
-      });
-
-      stats = {
-        total_messages: 0,
-        daily_free_date: today,
-        daily_free_used: 0,
-      };
-    }
-
     let dailyFreeUsed =
-      stats.daily_free_date === today ? stats.daily_free_used ?? 0 : 0;
+      statsRow?.daily_free_date === today
+        ? statsRow.daily_free_used ?? 0
+        : 0;
 
-    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+    let dailyFreeRemaining = Math.max(
+      DAILY_FREE_LIMIT - dailyFreeUsed,
+      0
+    );
 
-    let useDailyFree = false;
+    // ─────────────────────────────────────────────
+    // Message allowance decision
+    // ─────────────────────────────────────────────
 
-    if (!unlimitedActive) {
-      if (dailyFreeRemaining > 0) {
-        useDailyFree = true;
-      } else if (remainingMessages > 0) {
-        // use banked
-      } else {
-        return NextResponse.json(
-          { error: "NO_MESSAGES_LEFT" },
-          { status: 402 }
-        );
-      }
+    let consume: "FREE" | "BANKED" | "UNLIMITED" | null = null;
+
+    if (unlimited) {
+      consume = "UNLIMITED";
+    } else if (dailyFreeRemaining > 0) {
+      consume = "FREE";
+    } else if (banked > 0) {
+      consume = "BANKED";
+    } else {
+      return NextResponse.json(
+        { error: "NO_MESSAGES_LEFT" },
+        { status: 402 }
+      );
     }
 
     // ─────────────────────────────────────────────
-    // OpenAI call
+    // OpenAI
     // ─────────────────────────────────────────────
 
     const completion = await openai.chat.completions.create({
@@ -295,12 +215,7 @@ export async function POST(
         { role: "system", content: buildMenuContext() },
         {
           role: "system",
-          content:
-            companion.systemPrompt +
-            "\n\n" +
-            buildMenuContext() +
-            "\n\n" +
-            memoryBlock,
+          content: companion.systemPrompt,
         },
         ...messages,
       ],
@@ -311,69 +226,52 @@ export async function POST(
       "Mmm… I had trouble hearing that.";
 
     // ─────────────────────────────────────────────
-    // Save memory
+    // Persist consumption (NO DERIVED STATE)
     // ─────────────────────────────────────────────
 
-    const lastUserMessage = [...messages]
-      .reverse()
-      .find((m) => m.role === "user")?.content;
-
-    if (lastUserMessage) {
-      const memoryCandidate = extractMemoryCandidate(lastUserMessage);
-      if (memoryCandidate) {
-        await saveMemory(appUserId, companionId, memoryCandidate);
-      }
-    }
-
-    // ─────────────────────────────────────────────
-    // Update stats
-    // ─────────────────────────────────────────────
-
-    const newTotal = (stats.total_messages ?? 0) + 1;
-
-    const statsUpdate: Record<string, unknown> = {
-      total_messages: newTotal,
-      last_visit_at: now.toISOString(),
-    };
-
-    if (useDailyFree) {
-      dailyFreeUsed += 1;
-      statsUpdate.daily_free_date = today;
-      statsUpdate.daily_free_used = dailyFreeUsed;
-    }
-
-    await serviceSupabase
-      .from("user_stats")
-      .update(statsUpdate)
-      .eq("user_id", appUserId);
-
-    if (!unlimitedActive && !useDailyFree) {
-      const newRemaining = Math.max(remainingMessages - 1, 0);
-
-      await serviceSupabase
-        .from("message_balances")
+    if (consume === "FREE") {
+      await supabase
+        .from("user_stats")
         .update({
-          remaining_messages: newRemaining,
-          updated_at: now.toISOString(),
+          daily_free_date: today,
+          daily_free_used: dailyFreeUsed + 1,
+          last_visit_at: now.toISOString(),
         })
         .eq("user_id", appUserId);
 
-      remainingMessages = newRemaining;
+      dailyFreeUsed += 1;
     }
 
-    dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+    if (consume === "BANKED") {
+      banked = Math.max(banked - 1, 0);
+
+      await supabase
+        .from("message_balances")
+        .update({
+          remaining_messages: banked,
+          updated_at: now.toISOString(),
+        })
+        .eq("user_id", appUserId);
+    }
+
+    dailyFreeRemaining = Math.max(
+      DAILY_FREE_LIMIT - dailyFreeUsed,
+      0
+    );
 
     return NextResponse.json({
       reply,
-      remainingMessages,
-      hasNomination: unlimitedActive,
-      nominationExpiresAt,
+      remainingMessages: banked,
+      hasNomination: unlimited,
       nominationJustEnded,
       hasDailyFreeAvailable: dailyFreeRemaining > 0,
       dailyFreeRemaining,
     });
   } catch (err) {
     console.error("Chat route error:", err);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Server error" },
+      { status: 500 }
+    );
   }
 }
