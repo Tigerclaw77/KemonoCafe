@@ -76,10 +76,7 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json(
-        { error: "Companion not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
     }
 
     const body = (await req.json()) as {
@@ -114,7 +111,7 @@ export async function POST(
     const today = now.toISOString().slice(0, 10);
 
     // ─────────────────────────────────────────────
-    // Nomination (authoritative)
+    // Nomination
     // ─────────────────────────────────────────────
 
     const { data: companionRow } = await supabase
@@ -146,48 +143,44 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // SINGLE SOURCE OF TRUTH
+    // Balances + stats (safe)
     // ─────────────────────────────────────────────
 
-    const [{ data: balanceRow }, upsertResult] = await Promise.all([
-      supabase
-        .from("message_balances")
-        .select("remaining_messages")
-        .eq("user_id", appUserId)
-        .maybeSingle(),
+    const { data: balanceRow } = await supabase
+      .from("message_balances")
+      .select("remaining_messages")
+      .eq("user_id", appUserId)
+      .maybeSingle();
 
-      // write-only upsert (do NOT depend on return value)
-      supabase.from("user_stats").upsert(
-        {
-          user_id: appUserId,
-          daily_free_date: today,
-          daily_free_used: 0,
-          last_visit_at: now.toISOString(),
-        },
-        { onConflict: "user_id" }
-      ),
-    ]);
+    // ensure row exists (write-only)
+    await supabase.from("user_stats").upsert(
+      {
+        user_id: appUserId,
+        daily_free_date: today,
+        daily_free_used: 0,
+        last_visit_at: now.toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
 
-    // guaranteed read
     const { data: statsRow } = await supabase
       .from("user_stats")
       .select("daily_free_date, daily_free_used")
       .eq("user_id", appUserId)
-      .single();
+      .maybeSingle();
 
     if (!statsRow) {
-      return NextResponse.json(
-        { error: "USER_STATS_NOT_FOUND" },
-        { status: 500 }
-      );
+      throw new Error("user_stats missing after upsert");
     }
 
     const banked = balanceRow?.remaining_messages ?? 0;
-
     const dailyFreeUsed =
       statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
-    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+    let dailyFreeRemaining = Math.max(
+      DAILY_FREE_LIMIT - dailyFreeUsed,
+      0
+    );
 
     // ─────────────────────────────────────────────
     // Decide consumption
@@ -225,7 +218,7 @@ export async function POST(
       "Mmm… I had trouble hearing that.";
 
     // ─────────────────────────────────────────────
-    // Persist consumption (ONLY PLACE)
+    // Persist consumption
     // ─────────────────────────────────────────────
 
     if (consume === "FREE") {
@@ -260,27 +253,13 @@ export async function POST(
       hasDailyFreeAvailable: dailyFreeRemaining > 0,
       dailyFreeRemaining,
     });
-  } catch (err: unknown) {
+  } catch (err) {
     console.error("Chat route error:", err);
-
-    let detail = "Unknown error";
-
-    if (err instanceof Error) {
-      detail = err.message;
-    } else if (
-      typeof err === "object" &&
-      err !== null &&
-      "error" in err &&
-      typeof (err as { error?: { message?: string } }).error?.message ===
-        "string"
-    ) {
-      detail = (err as { error: { message: string } }).error.message;
-    }
 
     return NextResponse.json(
       {
         error: "Server error",
-        detail,
+        detail: err instanceof Error ? err.message : "Unknown error",
       },
       { status: 500 }
     );
