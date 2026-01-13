@@ -1,4 +1,3 @@
-// frontend/app/auth/page.tsx
 "use client";
 
 import React, { useState } from "react";
@@ -13,10 +12,10 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [userContext, setUserContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null); // for magic-link status
-  const [userContext, setUserContext] = useState("");
+  const [info, setInfo] = useState<string | null>(null);
 
   const isLogin = mode === "login";
 
@@ -28,41 +27,27 @@ export default function AuthPage() {
 
     try {
       if (isLogin) {
-        // Email + password login
-        const { error: signInError } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
-        if (signInError) {
-          throw signInError;
-        }
-
+        if (error) throw error;
         router.push("/");
       } else {
-        // Registration
-        const { data, error: signUpError } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
         });
 
-        if (signUpError) {
-          throw signUpError;
-        }
+        if (error) throw error;
 
-        // Create matching profile row (best-effort)
         if (data.user) {
-          const { error: profileError } = await supabase
-            .from("profiles")
-            .insert({
-              id: data.user.id,
-              display_name: displayName || null,
-              user_context: userContext || null,
-            });
-
-          if (profileError) {
-            console.warn("Profile insert failed:", profileError);
-          }
+          await supabase.from("profiles").insert({
+            id: data.user.id,
+            display_name: displayName || null,
+            user_context: userContext || null,
+          });
         }
 
         router.push("/");
@@ -71,19 +56,15 @@ export default function AuthPage() {
       console.error("Auth error:", err);
 
       if (err instanceof AuthApiError) {
-        // Supabase auth-specific errors
         if (isLogin && err.status === 400) {
-          // “Invalid login credentials”
-          setError("Incorrect email or password. Please try again.");
+          setError("Incorrect email or password.");
         } else if (err.status === 429) {
-          setError(
-            "Too many attempts in a short time. Please wait a moment and try again."
-          );
+          setError("Too many attempts. Please wait and try again.");
         } else {
-          setError(err.message || "Could not sign you in. Please try again.");
+          setError(err.message);
         }
       } else if (err instanceof Error) {
-        setError(err.message || "Something went wrong.");
+        setError(err.message);
       } else {
         setError("Something went wrong.");
       }
@@ -92,7 +73,6 @@ export default function AuthPage() {
     }
   };
 
-  // Magic-link login (login mode only)
   const handleMagicLink = async () => {
     setError(null);
     setInfo(null);
@@ -104,38 +84,26 @@ export default function AuthPage() {
 
     setLoading(true);
     try {
-      const { error: magicError } = await supabase.auth.signInWithOtp({
+      const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/`
-              : undefined,
+          emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
         },
       });
 
-      if (magicError) {
-        throw magicError;
-      }
-
+      if (error) throw error;
       setInfo("Magic login link sent. Please check your email.");
     } catch (err: unknown) {
       console.error("Magic-link error:", err);
 
       if (err instanceof AuthApiError) {
-        if (err.status === 400) {
-          setError(
-            "We couldn’t send a magic link to that address. Please check for typos and try again."
-          );
-        } else if (err.status === 429) {
-          setError(
-            "Too many magic link requests. Please wait a moment and try again."
-          );
+        if (err.status === 429) {
+          setError("Too many magic link requests. Please wait.");
         } else {
-          setError(err.message || "Could not send magic link.");
+          setError(err.message);
         }
       } else if (err instanceof Error) {
-        setError(err.message || "Could not send magic link.");
+        setError(err.message);
       } else {
         setError("Could not send magic link.");
       }
@@ -150,6 +118,7 @@ export default function AuthPage() {
         <h1 className="text-xl font-semibold text-slate-800 mb-1 text-center">
           {isLogin ? "Welcome back to Kemono Cafe" : "Create your café account"}
         </h1>
+
         <p className="text-xs text-slate-500 mb-4 text-center">
           {isLogin
             ? "Log in to keep your companions, message limits, and nominations in sync."
@@ -180,71 +149,57 @@ export default function AuthPage() {
 
         <form onSubmit={handleSubmit} className="space-y-3">
           {!isLogin && (
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                Display name (optional)
-              </label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
-                placeholder="What should the girls call you?"
-              />
-            </div>
-          )}
-          {!isLogin && (
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                Anything else you want us to know about you?{" "}
-                <span className="text-slate-400">(optional)</span>
-              </label>
-              <textarea
-                value={userContext}
-                onChange={(e) => setUserContext(e.target.value)}
-                rows={2}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300 resize-none"
-                placeholder="e.g. man, interested in women, college student"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Email
-            </label>
             <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
-              placeholder="you@example.com"
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Display name (optional)"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300"
             />
-          </div>
+          )}
+
+          {!isLogin && (
+            <textarea
+              value={userContext}
+              onChange={(e) => setUserContext(e.target.value)}
+              rows={2}
+              placeholder="Anything else we should know? (optional)"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 resize-none"
+            />
+          )}
+
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300"
+          />
 
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
-              Password
-            </label>
             <input
               type="password"
-              required={!isLogin} // for magic-link users we technically don't need it, but keep simple for now
+              required={!isLogin}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300"
-              placeholder="••••••••"
+              placeholder="Password"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300"
             />
+            {isLogin && (
+              <p className="mt-1 text-[10px] text-slate-500">
+                Not required for magic link login
+              </p>
+            )}
           </div>
 
-          {error && <p className="text-[11px] text-red-500 mt-1">{error}</p>}
-
-          {info && <p className="text-[11px] text-emerald-600 mt-1">{info}</p>}
+          {error && <p className="text-[11px] text-red-500">{error}</p>}
+          {info && <p className="text-[11px] text-emerald-600">{info}</p>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-2 inline-flex items-center justify-center rounded-full bg-pink-500 px-4 py-2 text-xs font-semibold text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pink-600 transition-colors"
+            className="w-full rounded-full bg-pink-500 px-4 py-2 text-xs font-semibold text-white hover:bg-pink-600 disabled:opacity-50"
           >
             {loading
               ? isLogin
@@ -256,22 +211,16 @@ export default function AuthPage() {
           </button>
         </form>
 
-        {/* Magic link button – login mode only */}
         {isLogin && (
           <button
             type="button"
             onClick={handleMagicLink}
             disabled={loading}
-            className="w-full mt-3 inline-flex items-center justify-center rounded-full border border-pink-300 bg-white px-4 py-2 text-xs font-semibold text-pink-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-pink-50 transition-colors"
+            className="w-full mt-3 rounded-full border border-pink-300 bg-white px-4 py-2 text-xs font-semibold text-pink-600 hover:bg-pink-50 disabled:opacity-50"
           >
             {loading ? "Sending link…" : "Send me a magic login link"}
           </button>
         )}
-
-        <p className="text-[11px] text-slate-400 mt-4 text-center">
-          You can still browse and chat in guest mode, but accounts keep your
-          companions and nominations saved.
-        </p>
       </div>
     </main>
   );
