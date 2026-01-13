@@ -22,7 +22,8 @@ const MESSAGE_VALUES: Record<string, number> = {
 
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
-  if (!sig) return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+  if (!sig)
+    return NextResponse.json({ error: "Missing signature" }, { status: 400 });
 
   const body = await req.text();
   let event: Stripe.Event;
@@ -88,6 +89,7 @@ export async function POST(req: NextRequest) {
   }
 
   console.log("messagesToAdd:", messagesToAdd);
+  console.log("SERVICE ROLE PRESENT:", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   if (messagesToAdd > 0) {
     await supabase.rpc("increment_messages", {
