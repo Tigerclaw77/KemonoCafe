@@ -53,8 +53,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     }
 
-    const companionId =
-      "companionId" in body ? body.companionId : undefined;
+    const companionId = "companionId" in body ? body.companionId : undefined;
 
     if (!companionId) {
       return NextResponse.json(
@@ -63,7 +62,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const origin = req.headers.get("origin") ?? "http://localhost:3000";
+    const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
+    console.log("SITE URL:", process.env.NEXT_PUBLIC_SITE_URL);
 
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
     const metadata: Record<string, string> = {

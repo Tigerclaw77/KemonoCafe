@@ -12,7 +12,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Bankable message values
 const MESSAGE_VALUES: Record<string, number> = {
   drink: 10,
   snack: 20,
@@ -30,7 +29,6 @@ export async function POST(req: NextRequest) {
   const body = await req.text();
 
   let event: Stripe.Event;
-
   try {
     event = stripe.webhooks.constructEvent(
       body,
@@ -48,9 +46,9 @@ export async function POST(req: NextRequest) {
 
   const session = event.data.object as Stripe.Checkout.Session;
 
-  const userId = session.metadata?.userId;
-  const companionId = session.metadata?.companionId ?? null;
-  const purchaseType = session.metadata?.type;
+  const metadata = session.metadata ?? {};
+  const userId = metadata.userId;
+  const companionId = metadata.companionId ?? null;
 
   if (!userId) {
     console.error("❌ Missing metadata.userId", session.id);
@@ -58,9 +56,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ───────────────────────────────────────────────
-  // Step 1 – Nomination (metadata-driven)
+  // Step 1 – Nomination (robust detection)
   // ───────────────────────────────────────────────
-  if (purchaseType === "nomination") {
+  const isNomination =
+    metadata.type === "nomination" || metadata.nomination === "true";
+
+  if (isNomination) {
     const now = new Date();
     const expires = new Date(now);
 
@@ -82,8 +83,6 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("❌ Nomination upsert failed:", error);
-    } else {
-      console.log("✅ Nomination granted", userId);
     }
 
     return NextResponse.json({ received: true });
@@ -118,8 +117,6 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("❌ Message increment failed:", error);
-    } else {
-      console.log(`✅ Added ${messagesToAdd} messages`, userId);
     }
   }
 
