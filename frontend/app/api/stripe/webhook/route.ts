@@ -3,30 +3,39 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+// ───────────────────────────────────────────────
 // Stripe init
+// ───────────────────────────────────────────────
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-06-20" as Stripe.LatestApiVersion,
+  apiVersion: "2025-11-17.clover",
 });
 
-// Supabase admin client
+// ───────────────────────────────────────────────
+// Supabase admin client (server-only)
+// ───────────────────────────────────────────────
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Admin level
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Bankable message dictionary
-const MESSAGE_VALUES: Record<string, number> = {
-  drink: 10,
-  snack: 20,
-  entree: 40,
-  dessert: 30,
-  full_course: 110,
+// ───────────────────────────────────────────────
+// Price → message mapping (Option 1)
+// ───────────────────────────────────────────────
+const PRICE_TO_MESSAGES: Record<string, number> = {
+  [process.env.STRIPE_PRICE_DRINK!]: 10,
+  [process.env.STRIPE_PRICE_SNACK!]: 20,
+  [process.env.STRIPE_PRICE_ENTREE!]: 40,
+  [process.env.STRIPE_PRICE_DESSERT!]: 30,
+  [process.env.STRIPE_PRICE_FULL_COURSE!]: 110,
 };
 
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) {
-    return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing Stripe signature" },
+      { status: 400 }
+    );
   }
 
   const body = await req.text();
@@ -40,78 +49,85 @@ export async function POST(req: NextRequest) {
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err) {
-    console.error("⚠️ Webhook signature error:", err);
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+    console.error("❌ Stripe webhook signature verification failed:", err);
+    return NextResponse.json(
+      { error: "Invalid signature" },
+      { status: 400 }
+    );
   }
 
+  // Only handle completed checkouts
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
 
   const session = event.data.object as Stripe.Checkout.Session;
-  const userId = session.client_reference_id;
-  const metadata = session.metadata || {};
+
+  // ✅ Correct source of truth
+  const userId = session.metadata?.userId;
+  const companionId = session.metadata?.companionId ?? null;
 
   if (!userId) {
-    console.error("Missing userId in metadata/session");
-    return NextResponse.json({ error: "missing userId" }, { status: 400 });
+    console.error("❌ Missing metadata.userId on checkout session", {
+      sessionId: session.id,
+    });
+    return NextResponse.json({ received: true });
   }
 
   // ───────────────────────────────────────────────
-  // Step 1 – Pull line items
+  // Step 1 – Fetch line items to get price IDs
   // ───────────────────────────────────────────────
-  const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
+  const lineItems = await stripe.checkout.sessions.listLineItems(session.id, {
+    limit: 10,
+  });
 
-  let addMessages = 0;
+  let messagesToAdd = 0;
   let nominationPurchased = false;
 
-  // Check metadata flags & Stripe items
   for (const item of lineItems.data) {
-    const description = item.description?.toLowerCase() || "";
+    const priceId = item.price?.id;
 
-    if (description.includes("nomination")) {
+    if (!priceId) continue;
+
+    // Nomination is its own price
+    if (priceId === process.env.STRIPE_PRICE_NOMINATION) {
       nominationPurchased = true;
       continue;
     }
 
-    // Detect full course
-    if (description.includes("full") && description.includes("course")) {
-      addMessages += MESSAGE_VALUES.full_course;
-      continue;
+    // Message packs
+    if (PRICE_TO_MESSAGES[priceId]) {
+      messagesToAdd += PRICE_TO_MESSAGES[priceId];
     }
-
-    // Detect individual menu items
-    if (description.includes("drink")) addMessages += MESSAGE_VALUES.drink;
-    if (description.includes("snack")) addMessages += MESSAGE_VALUES.snack;
-    if (description.includes("entree")) addMessages += MESSAGE_VALUES.entree;
-    if (description.includes("dessert")) addMessages += MESSAGE_VALUES.dessert;
   }
 
   // ───────────────────────────────────────────────
-  // Step 2 – Apply MENU messages (bankable)
+  // Step 2 – Apply message credits (bankable)
   // ───────────────────────────────────────────────
-  if (addMessages > 0) {
+  if (messagesToAdd > 0) {
     const { error } = await supabase.rpc("increment_messages", {
       user_id: userId,
-      amount: addMessages,
+      amount: messagesToAdd,
     });
 
     if (error) {
-      console.error("Failed to add messages:", error);
+      console.error("❌ Failed to increment messages:", error);
+    } else {
+      console.log(
+        `✅ Added ${messagesToAdd} messages for user ${userId}`
+      );
     }
   }
 
   // ───────────────────────────────────────────────
-  // Step 3 – Nomination: unlimited until next 3AM
+  // Step 3 – Nomination: unlimited until next 3 AM
   // ───────────────────────────────────────────────
   if (nominationPurchased) {
     const now = new Date();
     const expires = new Date(now);
 
-    // Move to next 3AM
     expires.setHours(3, 0, 0, 0);
     if (now.getHours() >= 3) {
-      // already past 3am today → use tomorrow
       expires.setDate(expires.getDate() + 1);
     }
 
@@ -120,12 +136,19 @@ export async function POST(req: NextRequest) {
       .upsert(
         {
           user_id: userId,
+          companion_id: companionId,
           expires_at: expires.toISOString(),
         },
         { onConflict: "user_id" }
       );
 
-    if (error) console.error("Failed nom. upsert:", error);
+    if (error) {
+      console.error("❌ Failed nomination upsert:", error);
+    } else {
+      console.log(
+        `✅ Nomination granted for user ${userId} until ${expires.toISOString()}`
+      );
+    }
   }
 
   return NextResponse.json({ received: true });
