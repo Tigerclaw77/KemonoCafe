@@ -22,9 +22,7 @@ const MESSAGE_VALUES: Record<string, number> = {
 
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
-  if (!sig) {
-    return NextResponse.json({ error: "Missing signature" }, { status: 400 });
-  }
+  if (!sig) return NextResponse.json({ error: "Missing signature" }, { status: 400 });
 
   const body = await req.text();
   let event: Stripe.Event;
@@ -36,7 +34,7 @@ export async function POST(req: NextRequest) {
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err) {
-    console.error("❌ Invalid webhook signature:", err);
+    console.error("Invalid signature", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -45,70 +43,53 @@ export async function POST(req: NextRequest) {
   }
 
   const session = event.data.object as Stripe.Checkout.Session;
-  const metadata = session.metadata || {};
 
-  const userId = metadata.userId;
-  const companionId = metadata.companionId ?? null;
+  const userId = session.metadata?.userId;
+  const companionId = session.metadata?.companionId ?? null;
+  const purchaseType = session.metadata?.type;
 
-  if (!userId) {
-    console.error("❌ Missing metadata.userId");
+  if (!userId) return NextResponse.json({ received: true });
+
+  // ───── Nomination ─────
+  if (purchaseType === "nomination") {
+    const now = new Date();
+    const expires = new Date(now);
+    expires.setHours(3, 0, 0, 0);
+    if (now.getHours() >= 3) expires.setDate(expires.getDate() + 1);
+
+    await supabase.from("nominations").upsert(
+      {
+        user_id: userId,
+        companion_id: companionId,
+        expires_at: expires.toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+
     return NextResponse.json({ received: true });
   }
 
-  // ─────────────────────────────
-  // 1️⃣ Nomination (flag-based)
-  // ─────────────────────────────
-  if (metadata.nomination === "true") {
-    const now = new Date();
-    const expires = new Date(now);
-
-    expires.setHours(3, 0, 0, 0);
-    if (now.getHours() >= 3) {
-      expires.setDate(expires.getDate() + 1);
-    }
-
-    const { error } = await supabase
-      .from("nominations")
-      .upsert(
-        {
-          user_id: userId,
-          companion_id: companionId,
-          expires_at: expires.toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
-
-    if (error) {
-      console.error("❌ Nomination upsert failed:", error);
-    } else {
-      console.log("✅ Nomination granted");
-    }
-  }
-
-  // ─────────────────────────────
-  // 2️⃣ Messages (metadata-driven)
-  // ─────────────────────────────
+  // ───── Messages ─────
+  const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
   let messagesToAdd = 0;
 
-  if (metadata.hasFullCourse === "true") {
-    messagesToAdd += MESSAGE_VALUES.full_course;
-  }
-
-  if (metadata.itemType && MESSAGE_VALUES[metadata.itemType]) {
-    messagesToAdd += MESSAGE_VALUES[metadata.itemType];
+  for (const item of lineItems.data) {
+    const desc = item.description?.toLowerCase() || "";
+    if (desc.includes("full") && desc.includes("course")) {
+      messagesToAdd += MESSAGE_VALUES.full_course;
+      continue;
+    }
+    if (desc.includes("drink")) messagesToAdd += MESSAGE_VALUES.drink;
+    if (desc.includes("snack")) messagesToAdd += MESSAGE_VALUES.snack;
+    if (desc.includes("entree")) messagesToAdd += MESSAGE_VALUES.entree;
+    if (desc.includes("dessert")) messagesToAdd += MESSAGE_VALUES.dessert;
   }
 
   if (messagesToAdd > 0) {
-    const { error } = await supabase.rpc("increment_messages", {
+    await supabase.rpc("increment_messages", {
       user_id: userId,
       amount: messagesToAdd,
     });
-
-    if (error) {
-      console.error("❌ Message increment failed:", error);
-    } else {
-      console.log(`✅ Added ${messagesToAdd} messages`);
-    }
   }
 
   return NextResponse.json({ received: true });
