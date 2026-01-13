@@ -13,10 +13,9 @@ import {
 } from "../../../../config";
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY!,
 });
 
-// SERVER-ONLY SUPABASE
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -30,15 +29,15 @@ type ChatMessage = {
 const DAILY_FREE_LIMIT = 6;
 const GRACE_MS = 5 * 60_000;
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
+// ───────────────────────── Helpers ─────────────────────────
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-fA-F-]{36}$/.test(value);
+function isUuid(v: string) {
+  return /^[0-9a-fA-F-]{36}$/.test(v);
 }
 
-function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
+function mapCharacterToCompanion(
+  character: CharacterConfig
+): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
@@ -63,9 +62,7 @@ function resolveCompanion(id: string): CompanionConfig | null {
   );
 }
 
-// ─────────────────────────────────────────────
-// Route
-// ─────────────────────────────────────────────
+// ───────────────────────── Route ─────────────────────────
 
 export async function POST(
   req: NextRequest,
@@ -76,10 +73,7 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json(
-        { error: "Companion not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
     }
 
     const body = (await req.json()) as {
@@ -95,9 +89,10 @@ export async function POST(
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
 
-    // ─────────────────────────────────────────────
-    // Resolve auth → app user
-    // ─────────────────────────────────────────────
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+
+    // ─────────── Resolve user ───────────
 
     const { data: userRow } = await supabase
       .from("users")
@@ -109,13 +104,7 @@ export async function POST(
       return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
     }
 
-    // const appUserId = userRow.id;
-    const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-
-    // ─────────────────────────────────────────────
-    // Nomination
-    // ─────────────────────────────────────────────
+    // ─────────── Nomination ───────────
 
     const { data: companionRow } = await supabase
       .from("companions")
@@ -145,9 +134,7 @@ export async function POST(
       }
     }
 
-    // ─────────────────────────────────────────────
-    // Balances + stats (safe)
-    // ─────────────────────────────────────────────
+    // ─────────── Balances ───────────
 
     const { data: balanceRow } = await supabase
       .from("message_balances")
@@ -155,52 +142,52 @@ export async function POST(
       .eq("user_id", body.userId)
       .maybeSingle();
 
-    // ensure row exists (write-only)
-    await supabase.from("user_stats").upsert(
-      {
-        user_id: body.userId,
-        daily_free_date: today,
-        daily_free_used: 0,
-        last_visit_at: now.toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
+    // ─────────── user_stats (create-once) ───────────
 
-    const { data: statsRow } = await supabase
+    let { data: statsRow } = await supabase
       .from("user_stats")
       .select("daily_free_date, daily_free_used")
       .eq("user_id", body.userId)
       .maybeSingle();
 
     if (!statsRow) {
-      throw new Error("user_stats missing after upsert");
+      await supabase.from("user_stats").insert({
+        user_id: body.userId,
+        daily_free_date: today,
+        daily_free_used: 0,
+        last_visit_at: now.toISOString(),
+      });
+
+      const retry = await supabase
+        .from("user_stats")
+        .select("daily_free_date, daily_free_used")
+        .eq("user_id", body.userId)
+        .single();
+
+      statsRow = retry.data!;
     }
 
     const banked = balanceRow?.remaining_messages ?? 0;
     const dailyFreeUsed =
       statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
-    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+    let dailyFreeRemaining = Math.max(
+      DAILY_FREE_LIMIT - dailyFreeUsed,
+      0
+    );
 
-    // ─────────────────────────────────────────────
-    // Decide consumption
-    // ─────────────────────────────────────────────
+    // ─────────── Decide consumption ───────────
 
     let consume: "UNLIMITED" | "FREE" | "BANKED";
 
-    if (unlimited) {
-      consume = "UNLIMITED";
-    } else if (dailyFreeRemaining > 0) {
-      consume = "FREE";
-    } else if (banked > 0) {
-      consume = "BANKED";
-    } else {
+    if (unlimited) consume = "UNLIMITED";
+    else if (dailyFreeRemaining > 0) consume = "FREE";
+    else if (banked > 0) consume = "BANKED";
+    else {
       return NextResponse.json({ error: "NO_MESSAGES_LEFT" }, { status: 402 });
     }
 
-    // ─────────────────────────────────────────────
-    // OpenAI
-    // ─────────────────────────────────────────────
+    // ─────────── OpenAI ───────────
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -217,16 +204,14 @@ export async function POST(
       completion.choices[0]?.message?.content ??
       "Mmm… I had trouble hearing that.";
 
-    // ─────────────────────────────────────────────
-    // Persist consumption
-    // ─────────────────────────────────────────────
+    // ─────────── Persist usage ───────────
 
     if (consume === "FREE") {
       await supabase
         .from("user_stats")
         .update({
-          daily_free_date: today,
           daily_free_used: dailyFreeUsed + 1,
+          daily_free_date: today,
           last_visit_at: now.toISOString(),
         })
         .eq("user_id", body.userId);
@@ -255,7 +240,6 @@ export async function POST(
     });
   } catch (err) {
     console.error("Chat route error:", err);
-
     return NextResponse.json(
       {
         error: "Server error",
