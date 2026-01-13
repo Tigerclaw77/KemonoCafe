@@ -20,6 +20,26 @@ const MESSAGE_VALUES: Record<string, number> = {
   full_course: 110,
 };
 
+async function resolveAppUserId(maybeId: string) {
+  // 1) If metadata userId is already public.users.id
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", maybeId)
+    .maybeSingle();
+
+  if (userRow?.id) return userRow.id;
+
+  // 2) Otherwise treat it as auth_user_id
+  const { data: userRow2 } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", maybeId)
+    .maybeSingle();
+
+  return userRow2?.id ?? null;
+}
+
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) {
@@ -46,33 +66,23 @@ export async function POST(req: NextRequest) {
 
   const session = event.data.object as Stripe.Checkout.Session;
 
-  console.log("WEBHOOK METADATA:", session.metadata);
-
-  // ⚠️ This is auth.users.id
-  const authUserId = session.metadata?.userId;
+  const rawUserId = session.metadata?.userId; // may be auth id OR app users.id
   const companionId = session.metadata?.companionId ?? null;
   const purchaseType = session.metadata?.type;
 
-  if (!authUserId) {
-    console.error("Missing userId in Stripe metadata");
+  console.log("WEBHOOK METADATA:", session.metadata);
+
+  if (!rawUserId) return NextResponse.json({ received: true });
+
+  const appUserId = await resolveAppUserId(rawUserId);
+
+  console.log("rawUserId:", rawUserId);
+  console.log("appUserId:", appUserId);
+
+  if (!appUserId) {
+    console.error("No matching public.users row for userId:", rawUserId);
     return NextResponse.json({ received: true });
   }
-
-  // ─────────────────────────────────────────────
-  // 🔑 Translate auth.users.id → public.users.id
-  // ─────────────────────────────────────────────
-  const { data: userRow, error: userError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", authUserId)
-    .single();
-
-  if (userError || !userRow) {
-    console.error("No public.users row for auth user:", authUserId, userError);
-    return NextResponse.json({ received: true });
-  }
-
-  const userId = userRow.id; // ✅ THIS is the ID message_balances expects
 
   // ───── Nomination ─────
   if (purchaseType === "nomination") {
@@ -81,20 +91,16 @@ export async function POST(req: NextRequest) {
     expires.setHours(3, 0, 0, 0);
     if (now.getHours() >= 3) expires.setDate(expires.getDate() + 1);
 
-    const { error: nominationError } = await supabase
-      .from("nominations")
-      .upsert(
-        {
-          user_id: userId, // ✅ public.users.id
-          companion_id: companionId,
-          expires_at: expires.toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
+    const { error } = await supabase.from("nominations").upsert(
+      {
+        user_id: appUserId,
+        companion_id: companionId,
+        expires_at: expires.toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
 
-    if (nominationError) {
-      console.error("Nomination upsert failed:", nominationError);
-    }
+    if (error) console.error("Nomination upsert error:", error);
 
     return NextResponse.json({ received: true });
   }
@@ -105,7 +111,6 @@ export async function POST(req: NextRequest) {
 
   for (const item of lineItems.data) {
     const desc = item.description?.toLowerCase() || "";
-
     if (desc.includes("full") && desc.includes("course")) {
       messagesToAdd += MESSAGE_VALUES.full_course;
       continue;
@@ -119,14 +124,12 @@ export async function POST(req: NextRequest) {
   console.log("messagesToAdd:", messagesToAdd);
 
   if (messagesToAdd > 0) {
-    const { error: rpcError } = await supabase.rpc("increment_messages", {
-      user_id: userId, // ✅ public.users.id
-      amount: messagesToAdd,
+    const { error } = await supabase.rpc("increment_messages", {
+      p_user_id: appUserId,
+      p_amount: messagesToAdd,
     });
 
-    if (rpcError) {
-      console.error("increment_messages failed:", rpcError);
-    }
+    if (error) console.error("increment_messages RPC error:", error);
   }
 
   return NextResponse.json({ received: true });
