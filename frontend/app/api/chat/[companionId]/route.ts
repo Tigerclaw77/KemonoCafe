@@ -189,16 +189,16 @@ export async function POST(
     // Ensure message balance row exists (SAFE)
     // ─────────────────────────────────────────────
 
-    await serviceSupabase
-      .from("message_balances")
-      .upsert(
-        {
-          user_id: userId,
-          remaining_messages: 0,
-          updated_at: now.toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
+    // await serviceSupabase
+    //   .from("message_balances")
+    //   .upsert(
+    //     {
+    //       user_id: userId,
+    //       remaining_messages: 0,
+    //       updated_at: now.toISOString(),
+    //     },
+    //     { onConflict: "user_id" }
+    //   );
 
     // ─────────────────────────────────────────────
     // Load memories (MVP)
