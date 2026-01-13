@@ -47,10 +47,14 @@ export async function POST(req: NextRequest) {
     // This avoids NEXT_PUBLIC_APP_URL and “Not a valid URL” issues
     const baseUrl = req.nextUrl.origin;
 
-    const successUrl = `${baseUrl}/?status=nomination_success&companionId=${encodeURIComponent(
-      companionId
-    )}`;
-    const cancelUrl = `${baseUrl}/?status=nomination_cancelled`;
+    const successUrl = `${baseUrl}/${encodeURIComponent(
+  companionId
+)}?status=nomination_success`;
+
+const cancelUrl = `${baseUrl}/${encodeURIComponent(
+  companionId
+)}?status=nomination_cancelled`;
+
 
     // quick safety check – throws if invalid
     new URL(successUrl);

@@ -1,5 +1,3 @@
-// frontend/app/api/checkout/route.ts
-
 import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -31,14 +29,16 @@ type ItemKey = keyof typeof ITEM_CONFIG;
 // Multi-item cart body (menu items + optional nomination toggle)
 type MultiItemBody = {
   userId: string;
+  companionId: string;
   items: { itemType: string; quantity: number }[];
   hasFullCourse?: boolean;
-  addNomination?: boolean; // NEW: add a nomination to this purchase
+  addNomination?: boolean;
 };
 
 // Legacy/single item body (still supported)
 type SingleItemBody = {
   userId: string;
+  companionId: string;
   itemType: ItemKey | "nomination";
 };
 
@@ -53,11 +53,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
     }
 
+    const companionId =
+      "companionId" in body ? body.companionId : undefined;
+
+    if (!companionId) {
+      return NextResponse.json(
+        { error: "Missing companionId" },
+        { status: 400 }
+      );
+    }
+
     const origin = req.headers.get("origin") ?? "http://localhost:3000";
 
-    // Let TS infer the array type from Stripe’s types
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-    const metadata: Record<string, string> = { userId };
+    const metadata: Record<string, string> = {
+      userId,
+      companionId,
+    };
 
     // ─────────────────────────────────────────
     // Cart-style: multiple items in `items`[]
@@ -65,7 +77,7 @@ export async function POST(req: NextRequest) {
     if ("items" in body && Array.isArray(body.items)) {
       const counts: Partial<Record<ItemKey, number>> = {};
 
-      // 1) Bankable menu items: drinks/snacks/entrees/desserts
+      // 1) Bankable menu items
       for (const entry of body.items) {
         const key = entry.itemType as ItemKey;
         const qty = entry.quantity ?? 0;
@@ -80,9 +92,7 @@ export async function POST(req: NextRequest) {
 
       let fullCourseCombos = 0;
 
-      // 2) If they qualified and hasFullCourse is true, treat 1 set as a Full Course combo.
-      //    Stripe is charged the discounted FULL_COURSE price,
-      //    we will later credit 110 messages per combo in the webhook.
+      // 2) Full Course combo
       if (
         body.hasFullCourse &&
         ITEM_CONFIG.full_course.priceId &&
@@ -91,15 +101,13 @@ export async function POST(req: NextRequest) {
         entreeQty > 0 &&
         dessertQty > 0
       ) {
-        fullCourseCombos = 1; // keep it simple: max 1 set
+        fullCourseCombos = 1;
 
-        // Remove 1 of each from the a-la-carte counts
         counts.drink = drinkQty - 1;
         counts.snack = snackQty - 1;
         counts.entree = entreeQty - 1;
         counts.dessert = dessertQty - 1;
 
-        // Add the Full Course combo as its own Stripe line item
         lineItems.push({
           price: ITEM_CONFIG.full_course.priceId,
           quantity: fullCourseCombos,
@@ -109,7 +117,7 @@ export async function POST(req: NextRequest) {
         metadata.fullCourseCombos = String(fullCourseCombos);
       }
 
-      // 3) Remaining à-la-carte items (still bankable)
+      // 3) Remaining à-la-carte items
       (["drink", "snack", "entree", "dessert"] as ItemKey[]).forEach((key) => {
         const qty = counts[key] ?? 0;
         const cfg = ITEM_CONFIG[key];
@@ -121,7 +129,7 @@ export async function POST(req: NextRequest) {
         });
       });
 
-      // 4) Optional nomination (premium, non-bankable)
+      // 4) Optional nomination
       if (body.addNomination && NOMINATION_PRICE_ID) {
         lineItems.push({
           price: NOMINATION_PRICE_ID,
@@ -138,8 +146,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       // ─────────────────────────────────────
-      // Legacy: single itemType in body
-      // Supports either a single menu item OR a single nomination.
+      // Legacy: single itemType
       // ─────────────────────────────────────
       const single = body as SingleItemBody;
       const key = single.itemType;
@@ -156,6 +163,7 @@ export async function POST(req: NextRequest) {
           price: NOMINATION_PRICE_ID,
           quantity: 1,
         });
+
         metadata.nomination = "true";
       } else {
         if (!key || !ITEM_CONFIG[key]) {
@@ -179,10 +187,14 @@ export async function POST(req: NextRequest) {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: lineItems,
-      success_url: `${origin}/checkout/success`,
-      cancel_url: `${origin}/checkout/cancel`,
       client_reference_id: userId,
       metadata,
+      success_url: `${origin}/${encodeURIComponent(
+        companionId
+      )}?status=checkout_success`,
+      cancel_url: `${origin}/${encodeURIComponent(
+        companionId
+      )}?status=checkout_cancelled`,
     });
 
     return NextResponse.json({ url: session.url });

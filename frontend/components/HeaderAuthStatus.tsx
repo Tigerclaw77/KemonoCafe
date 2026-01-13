@@ -23,9 +23,7 @@ export default function HeaderAuthStatus() {
           console.warn("supabase.auth.getUser error:", error);
         }
         if (!ignore) {
-          setUser(
-            data.user ? { email: data.user.email ?? null } : null
-          );
+          setUser(data.user ? { email: data.user.email ?? null } : null);
         }
       } finally {
         if (!ignore) setLoading(false);
@@ -37,9 +35,7 @@ export default function HeaderAuthStatus() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(
-        session?.user ? { email: session.user.email ?? null } : null
-      );
+      setUser(session?.user ? { email: session.user.email ?? null } : null);
     });
 
     return () => {
@@ -58,7 +54,7 @@ export default function HeaderAuthStatus() {
     return (
       <div className="text-xs text-slate-500 flex items-center gap-3">
         <span className="inline-block rounded-full bg-pink-50 px-3 py-1">
-          Guest mode · 6 free messages
+          Guest mode
         </span>
         <Link
           href="/auth"
@@ -71,21 +67,16 @@ export default function HeaderAuthStatus() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1 text-[11px] text-slate-500">
-      <span className="inline-flex items-center gap-2 rounded-full bg-pink-50 px-3 py-1">
-        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+    <div className="flex flex-col items-end gap-1 text-[11px]">
+      <span className="auth-pill">
+        <span className="auth-dot" />
         <span>
           Logged in as{" "}
-          <span className="font-medium">
-            {user.email ?? "guest"}
-          </span>
+          <span className="font-medium">{user.email ?? "guest"}</span>
         </span>
       </span>
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="text-[11px] text-pink-600 hover:text-pink-700 underline underline-offset-2"
-      >
+
+      <button type="button" onClick={handleLogout} className="auth-logout">
         Logout
       </button>
     </div>

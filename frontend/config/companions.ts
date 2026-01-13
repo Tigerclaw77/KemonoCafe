@@ -1,5 +1,8 @@
 // frontend/config/companions.ts
 
+// companions.ts exists ONLY as a legacy bridge.
+// Penny & Sandy will be moved into CHARACTERS_BY_ID post-MVP.
+
 import {
   PENNY_SYSTEM_PROMPT,
   PENNY_PROFILE_BIO,

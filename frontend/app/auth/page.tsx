@@ -16,6 +16,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null); // for magic-link status
+  const [userContext, setUserContext] = useState("");
 
   const isLogin = mode === "login";
 
@@ -56,6 +57,7 @@ export default function AuthPage() {
             .insert({
               id: data.user.id,
               display_name: displayName || null,
+              user_context: userContext || null,
             });
 
           if (profileError) {
@@ -191,6 +193,21 @@ export default function AuthPage() {
               />
             </div>
           )}
+          {!isLogin && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Anything else you want us to know about you?{" "}
+                <span className="text-slate-400">(optional)</span>
+              </label>
+              <textarea
+                value={userContext}
+                onChange={(e) => setUserContext(e.target.value)}
+                rows={2}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300 focus:border-pink-300 resize-none"
+                placeholder="e.g. man, interested in women, college student"
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -220,13 +237,9 @@ export default function AuthPage() {
             />
           </div>
 
-          {error && (
-            <p className="text-[11px] text-red-500 mt-1">{error}</p>
-          )}
+          {error && <p className="text-[11px] text-red-500 mt-1">{error}</p>}
 
-          {info && (
-            <p className="text-[11px] text-emerald-600 mt-1">{info}</p>
-          )}
+          {info && <p className="text-[11px] text-emerald-600 mt-1">{info}</p>}
 
           <button
             type="submit"

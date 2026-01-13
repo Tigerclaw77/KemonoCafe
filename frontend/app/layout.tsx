@@ -2,6 +2,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { geistSans, geistMono } from "../lib/fonts";
+import AuthBootstrap from "../components/AuthBootstrap";
+import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
   title: "Kemono Cafe",
@@ -16,7 +18,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <AuthBootstrap />
         {children}
+        <Footer />
       </body>
     </html>
   );

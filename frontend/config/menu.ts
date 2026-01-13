@@ -27,7 +27,7 @@ export const MENU_ITEMS: MenuItem[] = [
     messages: 10,
     priceCents: 199,
     description: "Freshly brewed, bold and aromatic.",
-    // vegan depends on milk choice, so leave undefined
+    vegan: true,
   },
   {
     id: "cola",
@@ -45,6 +45,7 @@ export const MENU_ITEMS: MenuItem[] = [
     messages: 10,
     priceCents: 199,
     description: "Stone-ground matcha whisked to a smooth froth.",
+    vegan: true,
   },
   {
     id: "latte",
@@ -80,7 +81,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Onigiri",
     messages: 20,
     priceCents: 349,
-    description: "Hand-pressed rice ball with a savory filling.",
+    description: "Hand-pressed rice ball filled with seasoned salmon.",
   },
   {
     id: "edamame",
@@ -97,7 +98,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Gyoza",
     messages: 20,
     priceCents: 349,
-    description: "Pan-fried dumplings with a juicy filling.",
+    description: "Pan-fried dumplings with a juicy pork filling.",
   },
   {
     id: "dango",
@@ -106,6 +107,7 @@ export const MENU_ITEMS: MenuItem[] = [
     messages: 20,
     priceCents: 349,
     description: "Sweet rice dumpling trio glazed in syrup.",
+    vegan: true,
   },
   {
     id: "fries",
@@ -133,7 +135,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Club Sandwich",
     messages: 40,
     priceCents: 599,
-    description: "Toasted triple-stack sandwich with fresh greens and sauce.",
+    description: "Toasted triple-stack sandwich with chicken, bacon, lettuce, tomato, and mayonnaise.",
   },
   {
     id: "egg_sandwich",
@@ -149,7 +151,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Carbonara",
     messages: 40,
     priceCents: 599,
-    description: "Creamy pasta tossed with parmesan and pepper.",
+    description: "Creamy pasta with egg, bacon, parmesan, and cracked pepper.",
   },
   {
     id: "spaghetti",
@@ -158,6 +160,7 @@ export const MENU_ITEMS: MenuItem[] = [
     messages: 40,
     priceCents: 599,
     description: "Tomato-simmered spaghetti with herbs and olive oil.",
+    vegan: true,
   },
   {
     id: "katsudon",
@@ -168,9 +171,9 @@ export const MENU_ITEMS: MenuItem[] = [
     description: "Crispy cutlet simmered with onions over rice.",
   },
   {
-    id: "vegan_entree",
+    id: "eggplant_curry",
     category: "entree",
-    name: "Vegan Entrée",
+    name: "Eggplant Curry",
     messages: 40,
     priceCents: 599,
     description: "Hearty plant-based dish with seasonal ingredients.",
@@ -184,7 +187,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Ice Cream Float",
     messages: 30,
     priceCents: 449,
-    description: "Creamy vanilla ice cream over fizzy soda.",
+    description: "Creamy vanilla ice cream over fizzy melon soda.",
   },
   {
     id: "cake",
@@ -192,7 +195,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Cake Slice",
     messages: 30,
     priceCents: 449,
-    description: "Light, moist cake with whipped cream frosting.",
+    description: "Moist chocolate spongecake with lightly sweetened whipped cream.",
   },
   {
     id: "fruit_tart",
@@ -200,15 +203,15 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Fruit Tart",
     messages: 30,
     priceCents: 449,
-    description: "Seasonal fruit layered over a crisp tart shell.",
+    description: "Seasonal fruit layered over vanilla custard in a crisp tart shell.",
   },
   {
-    id: "vegan_berry_parfait",
+    id: "berry_parfait",
     category: "dessert",
-    name: "Vegan Berry Parfait",
+    name: "Berry Parfait",
     messages: 30,
     priceCents: 449,
-    description: "Layers of berries, cream, and crunch, dairy-free.",
+    description: "Layers of fresh berries, almond cream, and crunchy granola.",
     vegan: true,
   },
   {
@@ -217,7 +220,7 @@ export const MENU_ITEMS: MenuItem[] = [
     name: "Crepe",
     messages: 30,
     priceCents: 449,
-    description: "Warm crepe filled with cream and fruit.",
+    description: "Warm crepe filled with seasonal fruit and lightly sweetened cream.",
   },
   {
     id: "cheesecake",
@@ -255,4 +258,29 @@ export function groupMenuByCategory(): Record<MenuCategory, MenuItem[]> {
   }
 
   return grouped;
+}
+
+export function buildMenuContext(): string {
+  const lines: string[] = [];
+
+  lines.push("Kemono Café Menu (authoritative):");
+  lines.push("");
+
+  for (const item of MENU_ITEMS) {
+    lines.push(
+      `- ${item.name} (${item.category}): ${item.description ?? "A menu item."}`
+    );
+  }
+
+  lines.push("");
+  lines.push("Menu rules:");
+  lines.push("- All items grant messages as listed");
+  lines.push("- Items have no variations or customizations");
+  lines.push("- Do not invent new menu items");
+  lines.push("- Do not offer substitutions");
+  lines.push("- If unsure, say the menu has details");
+  lines.push("- Describe items like a café server, not a chef");
+  lines.push("- Focus on mood, comfort, and pairing");
+
+  return lines.join("\n");
 }

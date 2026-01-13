@@ -8,7 +8,7 @@ export const CHARACTER_META = {
       bloodType: "O",
       recommendations: {
         drink: "Apple Juice",
-        snack: "Inari-zushi",
+        snack: "Inari-Zushi",
         entree: "Katsudon",
         dessert: "Ice Cream Float",
       },
@@ -21,7 +21,7 @@ export const CHARACTER_META = {
       bloodType: "A",
       recommendations: {
         drink: "Latte",
-        snack: "Inari-zushi",
+        snack: "Inari-Zushi",
         entree: "Egg Sandwich",
         dessert: "Crepe",
       },
@@ -35,7 +35,7 @@ export const CHARACTER_META = {
       recommendations: {
         drink: "Matcha",
         snack: "Edamame",
-        entree: "Eggplant Curry (V)",
+        entree: "Eggplant Curry",
         dessert: "Fruit Tart",
       },
     },
@@ -49,7 +49,7 @@ export const CHARACTER_META = {
         drink: "Cola",
         snack: "Gyoza",
         entree: "Carbonara",
-        dessert: "Banana Split",
+        dessert: "Ice Cream Float",
       },
     },
     {
@@ -75,7 +75,7 @@ export const CHARACTER_META = {
         drink: "Coffee",
         snack: "Gyoza",
         entree: "Katsudon",
-        dessert: "Cake",
+        dessert: "Cake Slice",
       },
     },
     {
@@ -88,7 +88,7 @@ export const CHARACTER_META = {
         drink: "Cola",
         snack: "French Fries",
         entree: "Club Sandwich",
-        dessert: "Banana Split",
+        dessert: "Ice Cream Float",
       },
     },
     {
@@ -114,7 +114,7 @@ export const CHARACTER_META = {
         drink: "Apple Juice",
         snack: "Edamame",
         entree: "Spaghetti",
-        dessert: "Berry & Banana Parfait (V)",
+        dessert: "Berry Parfait",
       },
     },
     {
@@ -127,7 +127,7 @@ export const CHARACTER_META = {
         drink: "Cola",
         snack: "Onigiri",
         entree: "Club Sandwich",
-        dessert: "Cake",
+        dessert: "Cake Slice",
       },
     },
     {
@@ -139,8 +139,8 @@ export const CHARACTER_META = {
       recommendations: {
         drink: "Melon Soda",
         snack: "Edamame",
-        entree: "Eggplant Curry (V)",
-        dessert: "Berry & Banana Parfait (V)",
+        entree: "Eggplant Curry",
+        dessert: "Berry Parfait",
       },
     },
     {
@@ -167,6 +167,33 @@ export const CHARACTER_META = {
         snack: "Edamame",
         entree: "Carbonara",
         dessert: "Cheesecake",
+      },
+    },
+
+    {
+      id: "elise",
+      birthday: "January 5",
+      zodiac: "Capricorn",
+      mbti: "INTJ",
+      bloodType: "AB",
+      recommendations: {
+        drink: "Coffee",
+        snack: "Inari-Zushi",
+        entree: "Spaghetti",
+        dessert: "Fruit Tart",
+      },
+    },
+    {
+      id: "noa",
+      birthday: "April 18",
+      zodiac: "Aries",
+      mbti: "INFP",
+      bloodType: "A",
+      recommendations: {
+        drink: "Matcha",
+        snack: "Dango",
+        entree: "Eggplant Curry",
+        dessert: "Berry Parfait",
       },
     },
   ],

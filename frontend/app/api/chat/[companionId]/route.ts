@@ -1,8 +1,7 @@
-// frontend/app/api/chat/[companionId]/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import { buildMenuContext } from "../../../../config/menu";
 
 import {
   getCompanionById,
@@ -19,7 +18,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Supabase service client (server-side only)
+// Service-role Supabase (server only)
 const serviceSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -31,56 +30,136 @@ type ChatMessage = {
 };
 
 const DAILY_FREE_LIMIT = 6;
+const GRACE_MS = 5 * 60_000;
 
-// UUID validator
+const CAFE_WORLD_PROMPT = `
+You are a server at Kemono Café.
+
+Rules:
+- You are one café companion among many.
+- You have coworkers, but you do NOT refer to yourself as your own coworker.
+- You do not invent menu items, prices, or variations.
+- Menu items are fixed; no substitutions or custom orders.
+- If asked about system mechanics, you may say:
+  "I'm not totally sure — the menu should explain it better."
+- Keep responses brand-safe and playful.
+
+Context:
+- This café has multiple animal-girl servers.
+- Each server knows the café exists and has coworkers.
+- Each server speaks only from her own perspective.
+`;
+
+const NAME_SAFETY_META_PROMPT = `
+If the user provides a name or nickname that is offensive, hateful, extremist,
+or clearly inappropriate to repeat, you must politely refuse to use it.
+
+Respond playfully and lightly, and suggest an alternative name based on a
+fictional literary character instead.
+
+Do not lecture, shame, or mention rules or policies.
+If the user provides a reasonable name afterward, accept it and move on.
+`;
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
 function isUuid(value: string): boolean {
-  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-    value
-  );
+  return /^[0-9a-fA-F-]{36}$/.test(value);
 }
 
-// Map from CharacterConfig -> CompanionConfig so the API can treat
-// Penny/Sandy and the rest (Yuki, Naomi, etc.) the same way.
 function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
-    emoji: "☆", // can customize later
+    emoji: "☆",
     avatarSrc: `/${character.file}`,
     imageSrc: `/${character.file}`,
     title: character.species,
     shortDescription: character.personality,
-    accentColor: "#f97373", // placeholder accent; can be per-girl later
+    accentColor: "#f97373",
     systemPrompt: character.systemPrompt,
     profileBio: character.profileBio,
   };
 }
 
-// Unified resolver: first try companions.ts (Penny/Sandy), then CHARACTERS
 function resolveCompanion(companionId: string): CompanionConfig | null {
-  const fromOld = getCompanionById(companionId);
-  if (fromOld) return fromOld;
-
-  const character = CHARACTERS_BY_ID[companionId as CharacterId];
-  if (!character) return null;
-
-  return mapCharacterToCompanion(character);
+  return (
+    getCompanionById(companionId) ??
+    (() => {
+      const c = CHARACTERS_BY_ID[companionId as CharacterId];
+      return c ? mapCharacterToCompanion(c) : null;
+    })()
+  );
 }
 
-// Note: in Next 16 dynamic route handlers, params is a Promise
+// ─────────────────────────────────────────────
+// MVP MEMORY HELPERS
+// ─────────────────────────────────────────────
+
+function extractMemoryCandidate(userMessage: string) {
+  const triggers = [
+    "i prefer",
+    "i usually",
+    "i like",
+    "i love",
+    "i don't like",
+    "i hate",
+    "i am not into",
+    "i always",
+  ];
+
+  const normalized = userMessage.toLowerCase();
+  if (!triggers.some((t) => normalized.includes(t))) return null;
+
+  return {
+    memory_type: "preference" as const,
+    content: `User ${userMessage.trim()}`,
+    importance: 0.8,
+  };
+}
+
+async function loadMemories(userId: string, companionId: string) {
+  const { data } = await serviceSupabase
+    .from("companion_memories")
+    .select("content")
+    .eq("user_id", userId)
+    .eq("companion_id", companionId)
+    .order("importance", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  return data?.map((m) => m.content) ?? [];
+}
+
+async function saveMemory(
+  userId: string,
+  companionId: string,
+  memory: {
+    memory_type: "fact" | "preference" | "boundary";
+    content: string;
+    importance: number;
+  }
+) {
+  await serviceSupabase.from("companion_memories").insert({
+    user_id: userId,
+    companion_id: companionId,
+    memory_type: memory.memory_type,
+    content: memory.content,
+    importance: memory.importance,
+  });
+}
+
+// ─────────────────────────────────────────────
+// Route
+// ─────────────────────────────────────────────
+
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ companionId: string }> }
 ) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is not set.");
-      return NextResponse.json(
-        { error: "Server misconfiguration: missing API key" },
-        { status: 500 }
-      );
-    }
-
     const { companionId } = await ctx.params;
     const companion = resolveCompanion(companionId);
 
@@ -95,95 +174,131 @@ export async function POST(
     const messages = body.messages as ChatMessage[] | undefined;
     const userId = body.userId as string | undefined;
 
-    if (!messages || !Array.isArray(messages)) {
-      return NextResponse.json(
-        { error: "Missing or invalid messages" },
-        { status: 400 }
-      );
+    if (!Array.isArray(messages)) {
+      return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
     }
 
-    // For the café economy we need a real Supabase UUID
     if (!userId || !isUuid(userId)) {
-      return NextResponse.json(
-        { error: "UNAUTHENTICATED" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
 
-    // ─────────────────────────────────────────────
-    // 1) Load remaining_messages + nomination + daily free counters
-    // ─────────────────────────────────────────────
-
-    // Main balance: profiles.remaining_messages
-    const { data: profile, error: profileError } = await serviceSupabase
-      .from("profiles")
-      .select("remaining_messages")
-      .eq("id", userId)
-      .single();
-
-    if (profileError) {
-      console.error("Error fetching profile:", profileError);
-      return NextResponse.json(
-        { error: "Failed to load profile" },
-        { status: 500 }
-      );
-    }
-
-    let remainingMessages = profile?.remaining_messages ?? 0;
-
-    // Nomination: unlimited until expires_at
     const now = new Date();
-    const nowIso = now.toISOString();
+    const today = now.toISOString().slice(0, 10);
 
-    const { data: nomination, error: nominationError } = await serviceSupabase
-      .from("nominations")
-      .select("expires_at")
+    // ─────────────────────────────────────────────
+    // Ensure message balance row exists (SAFE)
+    // ─────────────────────────────────────────────
+
+    await serviceSupabase
+      .from("message_balances")
+      .upsert(
+        {
+          user_id: userId,
+          remaining_messages: 0,
+          updated_at: now.toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    // ─────────────────────────────────────────────
+    // Load memories (MVP)
+    // ─────────────────────────────────────────────
+
+    const memories = await loadMemories(userId, companionId);
+
+    const memoryBlock =
+      memories.length > 0
+        ? `\nKnown facts about the user:\n${memories
+            .map((m) => `- ${m}`)
+            .join("\n")}\n`
+        : "";
+
+    // ─────────────────────────────────────────────
+    // Nomination state
+    // ─────────────────────────────────────────────
+
+    const { data: companionRow } = await serviceSupabase
+      .from("companions")
+      .select("id, nomination_expires_at, nomination_grace_used")
       .eq("user_id", userId)
-      .gt("expires_at", nowIso)
+      .eq("character_id", companionId)
       .maybeSingle();
 
-    if (nominationError && nominationError.code !== "PGRST116") {
-      console.error("Error fetching nomination:", nominationError);
+    const nominationExpiresAt = companionRow?.nomination_expires_at
+      ? new Date(companionRow.nomination_expires_at)
+      : null;
+
+    const graceUsed = companionRow?.nomination_grace_used === true;
+
+    let unlimitedActive = false;
+    let nominationJustEnded = false;
+
+    if (nominationExpiresAt && now <= nominationExpiresAt) {
+      unlimitedActive = true;
+    } else if (
+      nominationExpiresAt &&
+      !graceUsed &&
+      now > nominationExpiresAt &&
+      now <= new Date(nominationExpiresAt.getTime() + GRACE_MS)
+    ) {
+      unlimitedActive = true;
+      nominationJustEnded = true;
+
+      if (companionRow?.id) {
+        await serviceSupabase
+          .from("companions")
+          .update({ nomination_grace_used: true })
+          .eq("id", companionRow.id);
+      }
     }
 
-    const hasNomination = !!nomination;
-    const nominationExpiresAt = nomination?.expires_at ?? null;
+    // ─────────────────────────────────────────────
+    // Load balances
+    // ─────────────────────────────────────────────
 
-    // Daily free info from user_stats
-    const { data: statsRow, error: statsError } = await serviceSupabase
+    const { data: balanceRow } = await serviceSupabase
+      .from("message_balances")
+      .select("remaining_messages")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    let remainingMessages = balanceRow?.remaining_messages ?? 0;
+
+    let { data: stats } = await serviceSupabase
       .from("user_stats")
       .select("total_messages, daily_free_date, daily_free_used")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (statsError && statsError.code !== "PGRST116") {
-      console.error("Error fetching user_stats:", statsError);
+    if (!stats) {
+      await serviceSupabase.from("user_stats").insert({
+        user_id: userId,
+        total_messages: 0,
+        daily_free_date: today,
+        daily_free_used: 0,
+        last_visit_at: now.toISOString(),
+      });
+
+      stats = {
+        total_messages: 0,
+        daily_free_date: today,
+        daily_free_used: 0,
+      };
     }
 
-    const todayStr = nowIso.slice(0, 10); // YYYY-MM-DD
-
-    const oldTotal = statsRow?.total_messages ?? 0;
-
-    let dailyFreeUsed = 0;
-    if (statsRow?.daily_free_date === todayStr) {
-      dailyFreeUsed = statsRow.daily_free_used ?? 0;
-    }
+    let dailyFreeUsed =
+      stats.daily_free_date === today ? stats.daily_free_used ?? 0 : 0;
 
     let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+
     let useDailyFree = false;
 
-    // ─────────────────────────────────────────────
-    // 2) Decide which bucket this message uses
-    // ─────────────────────────────────────────────
-
-    if (!hasNomination) {
-      if (remainingMessages > 0) {
-        // Use banked message, handled later by decrement
-      } else if (dailyFreeRemaining > 0) {
-        // Use one daily free
+    if (!unlimitedActive) {
+      if (dailyFreeRemaining > 0) {
         useDailyFree = true;
+      } else if (remainingMessages > 0) {
+        // use banked
       } else {
-        // No nomination, no bank, no daily freebies
         return NextResponse.json(
           { error: "NO_MESSAGES_LEFT" },
           { status: 402 }
@@ -191,118 +306,100 @@ export async function POST(
       }
     }
 
+    const menuContext = buildMenuContext();
+
     // ─────────────────────────────────────────────
-    // 3) Call OpenAI with the companion prompt
+    // OpenAI call
     // ─────────────────────────────────────────────
 
-    const response = await openai.chat.completions.create({
+    const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 140,
       temperature: 0.9,
+      max_tokens: 140,
       messages: [
+        { role: "system", content: CAFE_WORLD_PROMPT },
+        { role: "system", content: NAME_SAFETY_META_PROMPT },
         {
           role: "system",
-          content: companion.systemPrompt,
+          content:
+            companion.systemPrompt +
+            "\n\n" +
+            menuContext +
+            "\n\n" +
+            memoryBlock,
         },
-        ...messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        ...messages,
       ],
     });
 
     const reply =
-      response.choices[0]?.message?.content ??
-      "Mmm… I had a little trouble hearing that, could you say it again?";
+      completion.choices[0]?.message?.content ??
+      "Mmm… I had trouble hearing that.";
 
     // ─────────────────────────────────────────────
-    // 4) Update stats: total messages + daily free counters
+    // Save memory (MVP)
     // ─────────────────────────────────────────────
 
-        const newTotal = oldTotal + 1;
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((m) => m.role === "user")?.content;
 
-    type StatsPayload = {
-      total_messages: number;
-      last_visit_at: string;
-      daily_free_date?: string;
-      daily_free_used?: number;
-    };
+    if (lastUserMessage) {
+      const memoryCandidate = extractMemoryCandidate(lastUserMessage);
+      if (memoryCandidate) {
+        await saveMemory(userId, companionId, memoryCandidate);
+      }
+    }
 
-    const statsPayload: StatsPayload = {
+    // ─────────────────────────────────────────────
+    // Update stats
+    // ─────────────────────────────────────────────
+
+    const newTotal = (stats.total_messages ?? 0) + 1;
+
+    const statsUpdate: Record<string, unknown> = {
       total_messages: newTotal,
-      last_visit_at: nowIso,
+      last_visit_at: now.toISOString(),
     };
 
     if (useDailyFree) {
-      const updatedUsed = dailyFreeUsed + 1;
-      statsPayload.daily_free_date = todayStr;
-      statsPayload.daily_free_used = updatedUsed;
-      dailyFreeUsed = updatedUsed;
+      dailyFreeUsed += 1;
+      statsUpdate.daily_free_date = today;
+      statsUpdate.daily_free_used = dailyFreeUsed;
     }
 
-    if (statsRow) {
-      const { error: updateStatsError } = await serviceSupabase
-        .from("user_stats")
-        .update(statsPayload)
+    await serviceSupabase
+      .from("user_stats")
+      .update(statsUpdate)
+      .eq("user_id", userId);
+
+    if (!unlimitedActive && !useDailyFree) {
+      const newRemaining = Math.max(remainingMessages - 1, 0);
+
+      await serviceSupabase
+        .from("message_balances")
+        .update({
+          remaining_messages: newRemaining,
+          updated_at: now.toISOString(),
+        })
         .eq("user_id", userId);
 
-      if (updateStatsError) {
-        console.error("Error updating user_stats:", updateStatsError);
-      }
-    } else {
-      const insertPayload: StatsPayload & { user_id: string } = {
-        user_id: userId,
-        ...statsPayload,
-      };
-
-      const { error: insertStatsError } = await serviceSupabase
-        .from("user_stats")
-        .insert(insertPayload);
-
-      if (insertStatsError) {
-        console.error("Error inserting user_stats:", insertStatsError);
-      }
+      remainingMessages = newRemaining;
     }
 
-    // ─────────────────────────────────────────────
-    // 5) Decrement banked messages if needed
-    // ─────────────────────────────────────────────
-
-    if (!hasNomination && !useDailyFree) {
-      const newBalance = Math.max(remainingMessages - 1, 0);
-
-      const { data: updatedProfile, error: updateError } =
-        await serviceSupabase
-          .from("profiles")
-          .update({ remaining_messages: newBalance })
-          .eq("id", userId)
-          .select("remaining_messages")
-          .single();
-
-      if (updateError) {
-        console.error("Failed to decrement remaining_messages:", updateError);
-      } else {
-        remainingMessages = updatedProfile.remaining_messages ?? newBalance;
-      }
-    }
-
-    // Recompute dailyFreeRemaining after this message
     dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
-    const hasDailyFreeAvailable = dailyFreeRemaining > 0;
 
     return NextResponse.json({
       reply,
       remainingMessages,
-      hasNomination,
+      hasNomination: unlimitedActive,
       nominationExpiresAt,
-      hasDailyFreeAvailable,
+      nominationJustEnded,
+      hasDailyFreeAvailable: dailyFreeRemaining > 0,
       dailyFreeRemaining,
     });
   } catch (err) {
     console.error("Chat route error:", err);
-    return NextResponse.json(
-      { error: "Server error while generating reply" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

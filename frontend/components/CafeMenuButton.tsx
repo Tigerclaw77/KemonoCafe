@@ -1,7 +1,8 @@
 // frontend/components/CafeMenuButton.tsx
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { supabase } from "../lib/supabaseClient";
 import { groupMenuByCategory } from "../config/menu";
 import MenuItemCard from "./MenuItemCard";
 import { parisienne } from "../lib/fonts";
@@ -31,6 +32,42 @@ export default function CafeMenuButton({
   const [showCart, setShowCart] = useState(false);
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+
+  // ✅ Fix: resolve user id from active Supabase session (don’t trust prop timing)
+  const [authChecked, setAuthChecked] = useState(false);
+  const [resolvedUserId, setResolvedUserId] = useState<string | undefined>(
+    userId
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function resolveAuth() {
+      if (userId) {
+        if (mounted) {
+          setResolvedUserId(userId);
+          setAuthChecked(true);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase.auth.getUser();
+
+      if (!mounted) return;
+
+      if (!error && data?.user?.id) {
+        setResolvedUserId(data.user.id);
+      } else {
+        setResolvedUserId(undefined);
+      }
+      setAuthChecked(true);
+    }
+
+    resolveAuth();
+    return () => {
+      mounted = false;
+    };
+  }, [userId]);
 
   const menuByCategory = groupMenuByCategory();
 
@@ -113,6 +150,13 @@ export default function CafeMenuButton({
     messages: number;
     priceCents: number;
   }) => {
+    if (!authChecked) return;
+
+    if (!resolvedUserId) {
+      alert("Please log in so we can save your messages.");
+      return;
+    }
+
     setCart((prev) => [...prev, item]);
     setShowCart(true);
   };
@@ -122,7 +166,9 @@ export default function CafeMenuButton({
   };
 
   const handleCheckout = async () => {
-    if (!userId) {
+    if (!authChecked) return;
+
+    if (!resolvedUserId) {
       alert("Please log in so we can save your messages.");
       return;
     }
@@ -156,7 +202,8 @@ export default function CafeMenuButton({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId,
+          userId: resolvedUserId,
+          companionId,
           items,
           hasFullCourse: fullCourseEligible,
         }),
@@ -183,28 +230,32 @@ export default function CafeMenuButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center rounded-full bg-pink-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-pink-600 transition-colors"
-      >
-        🍰 Order from the café
-      </button>
+        className="
+    inline-flex items-center gap-2
+    rounded-full px-3 py-1
+    text-[11px] font-medium
 
+    bg-[rgba(20,18,35,0.45)]
+    text-[rgba(220,230,255,0.85)]
+    border border-[rgba(255,255,255,0.12)]
+
+    hover:bg-[rgba(20,18,35,0.65)]
+    transition
+  "
+      >
+        🍰 Café menu
+      </button>
       {open && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
           <div className="relative w-full max-w-3xl rounded-3xl bg-[#f9f4ec] border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
             {/* Header */}
             <header className="relative px-6 py-4 border-b border-slate-200">
               <div className="text-center">
-                {/* <p className="text-[10px] tracking-[0.2em] uppercase text-slate-500">
-                  Kemono Cafe
-                </p> */}
                 <h1
                   className={`${parisienne.className} text-[2.4rem] leading-none text-slate-900`}
                 >
                   Kemono Cafe Menu
                 </h1>
-                {/* <p className="mt-1 text-[11px] text-slate-600">
-                  Choose a few favorites, then check out once.
-                </p> */}
               </div>
               <button
                 type="button"
@@ -304,7 +355,7 @@ export default function CafeMenuButton({
                             description={item.description}
                             vegan={item.vegan}
                             companionId={companionId}
-                            userId={userId}
+                            userId={resolvedUserId}
                             onAddToCart={handleAddToCart}
                           />
                         ))}

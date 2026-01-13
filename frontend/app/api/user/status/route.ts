@@ -1,15 +1,19 @@
 // frontend/app/api/user/status/route.ts
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Admin level, server-side only
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-side only
 );
 
 const DAILY_FREE_LIMIT = 6;
+const GRACE_MS = 5 * 60_000;
 
-// Simple UUID validator (v4-style, good enough for our use)
 function isUuid(value: string): boolean {
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
     value
@@ -20,78 +24,113 @@ export async function POST(req: NextRequest) {
   try {
     const { userId } = await req.json();
 
-    // Guests or non-UUID are treated as "no balance, no freebies" for now.
+    // Guest / invalid
     if (!userId || !isUuid(userId)) {
       return NextResponse.json({
         remainingMessages: 0,
         hasNomination: false,
         nominationExpiresAt: null,
+        nominationGraceEndsAt: null,
         hasDailyFreeAvailable: false,
         dailyFreeRemaining: 0,
       });
     }
 
-    // 1) Get profile.remaining_messages
-    const { data: profile, error: profileError } = await supabase
+    const now = new Date();
+    const nowMs = now.getTime();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    // ─────────────────────────────────────
+    // 1) Banked messages
+    // ─────────────────────────────────────
+
+    const { data: profile } = await supabase
       .from("profiles")
       .select("remaining_messages")
       .eq("id", userId)
       .maybeSingle();
 
-    if (profileError && profileError.code !== "PGRST116") {
-      console.error("Error fetching profile:", profileError);
-      return NextResponse.json(
-        { error: "Failed to load profile" },
-        { status: 500 }
-      );
-    }
-
     const remainingMessages = profile?.remaining_messages ?? 0;
 
-    // 2) Daily free info from user_stats
-    const { data: stats, error: statsError } = await supabase
+    // ─────────────────────────────────────
+    // 2) Daily free messages
+    // ─────────────────────────────────────
+
+    const { data: stats } = await supabase
       .from("user_stats")
       .select("daily_free_date, daily_free_used")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (statsError && statsError.code !== "PGRST116") {
-      console.error("Error fetching user_stats:", statsError);
+    if (!stats) {
+      await supabase.from("user_stats").insert({
+        user_id: userId,
+        daily_free_date: todayStr,
+        daily_free_used: 0,
+        total_messages: 0,
+        last_visit_at: now.toISOString(),
+      });
     }
 
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
-
-    let dailyFreeUsed = 0;
-
-    if (stats?.daily_free_date === todayStr) {
-      dailyFreeUsed = stats.daily_free_used ?? 0;
-    }
+    const dailyFreeUsed =
+      stats?.daily_free_date === todayStr ? stats.daily_free_used ?? 0 : 0;
 
     const dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+
     const hasDailyFreeAvailable = dailyFreeRemaining > 0;
 
-    // 3) Check nomination (if present and not expired)
-    const nowIso = now.toISOString();
+    // ─────────────────────────────────────
+    // 3) Nomination (AUTHORITATIVE SOURCE)
+    // ─────────────────────────────────────
 
-    const { data: nomination, error: nominationError } = await supabase
-      .from("nominations")
-      .select("expires_at")
+    const { data: companionRow } = await supabase
+      .from("companions")
+      .select("nomination_expires_at, nomination_grace_used")
       .eq("user_id", userId)
-      .gt("expires_at", nowIso)
       .maybeSingle();
 
-    if (nominationError && nominationError.code !== "PGRST116") {
-      console.error("Error fetching nomination:", nominationError);
+    let hasNomination = false;
+    let nominationExpiresAt: string | null = null;
+    let nominationGraceEndsAt: string | null = null;
+
+    if (companionRow?.nomination_expires_at) {
+      const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
+
+      const graceEndMs = expiresMs + GRACE_MS;
+
+      if (nowMs <= expiresMs) {
+        // Active nomination
+        hasNomination = true;
+        nominationExpiresAt = companionRow.nomination_expires_at;
+        nominationGraceEndsAt = new Date(graceEndMs).toISOString();
+      } else if (
+        !companionRow.nomination_grace_used &&
+        nowMs > expiresMs &&
+        nowMs <= graceEndMs
+      ) {
+        // Grace window
+        hasNomination = true;
+        nominationExpiresAt = companionRow.nomination_expires_at;
+        nominationGraceEndsAt = new Date(graceEndMs).toISOString();
+      }
     }
 
-    const hasNomination = !!nomination;
-    const nominationExpiresAt = nomination?.expires_at ?? null;
+    console.log(
+      "[user/status]",
+      userId,
+      "banked:",
+      remainingMessages,
+      "dailyFree:",
+      dailyFreeRemaining,
+      "nomination:",
+      hasNomination
+    );
 
     return NextResponse.json({
       remainingMessages,
       hasNomination,
       nominationExpiresAt,
+      nominationGraceEndsAt,
       hasDailyFreeAvailable,
       dailyFreeRemaining,
     });
