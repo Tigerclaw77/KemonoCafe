@@ -16,7 +16,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// SERVER-ONLY SUPABASE
+// SERVER-ONLY SUPABASE (service role)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -38,7 +38,9 @@ function isUuid(value: string): boolean {
   return /^[0-9a-fA-F-]{36}$/.test(value);
 }
 
-function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
+function mapCharacterToCompanion(
+  character: CharacterConfig
+): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
@@ -82,10 +84,9 @@ export async function POST(
       );
     }
 
-    const { messages, userId: authUserId } = (await req.json()) as {
-      messages?: ChatMessage[];
-      userId?: string;
-    };
+    const body = await req.json();
+    const messages = body.messages as ChatMessage[] | undefined;
+    const authUserId = body.userId as string | undefined;
 
     if (!Array.isArray(messages)) {
       return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
@@ -99,14 +100,17 @@ export async function POST(
     // Resolve auth → app user (HARD REQUIREMENT)
     // ─────────────────────────────────────────────
 
-    const { data: userRow } = await supabase
+    const { data: userRow, error: userErr } = await supabase
       .from("users")
       .select("id")
       .eq("auth_user_id", authUserId)
       .single();
 
-    if (!userRow) {
-      return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
+    if (userErr || !userRow) {
+      return NextResponse.json(
+        { error: "USER_NOT_SYNCED" },
+        { status: 401 }
+      );
     }
 
     const appUserId = userRow.id;
@@ -128,13 +132,18 @@ export async function POST(
     let nominationJustEnded = false;
 
     if (companionRow?.nomination_expires_at) {
-      const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
+      const expiresMs = new Date(
+        companionRow.nomination_expires_at
+      ).getTime();
       const graceEndMs = expiresMs + GRACE_MS;
       const nowMs = now.getTime();
 
       if (nowMs <= expiresMs) {
         unlimited = true;
-      } else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
+      } else if (
+        !companionRow.nomination_grace_used &&
+        nowMs <= graceEndMs
+      ) {
         unlimited = true;
         nominationJustEnded = true;
 
@@ -146,7 +155,23 @@ export async function POST(
     }
 
     // ─────────────────────────────────────────────
-    // SINGLE SOURCE OF TRUTH (balances + stats)
+    // Ensure user_stats EXISTS (critical fix)
+    // ─────────────────────────────────────────────
+
+    await supabase
+      .from("user_stats")
+      .upsert(
+        {
+          user_id: appUserId,
+          daily_free_date: today,
+          daily_free_used: 0,
+          last_visit_at: now.toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    // ─────────────────────────────────────────────
+    // Load balances (single source of truth)
     // ─────────────────────────────────────────────
 
     const [{ data: balanceRow }, { data: statsRow }] = await Promise.all([
@@ -158,29 +183,22 @@ export async function POST(
 
       supabase
         .from("user_stats")
-        .upsert(
-          {
-            user_id: appUserId,
-            daily_free_date: today,
-            daily_free_used: 0,
-            last_visit_at: now.toISOString(),
-          },
-          { onConflict: "user_id" }
-        )
         .select("daily_free_date, daily_free_used")
+        .eq("user_id", appUserId)
         .single(),
     ]);
-
-    if (!statsRow) {
-      throw new Error("user_stats upsert failed");
-    }
 
     const banked = balanceRow?.remaining_messages ?? 0;
 
     const dailyFreeUsed =
-      statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
+      statsRow.daily_free_date === today
+        ? statsRow.daily_free_used
+        : 0;
 
-    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+    let dailyFreeRemaining = Math.max(
+      DAILY_FREE_LIMIT - dailyFreeUsed,
+      0
+    );
 
     // ─────────────────────────────────────────────
     // Decide consumption
@@ -195,7 +213,10 @@ export async function POST(
     } else if (banked > 0) {
       consume = "BANKED";
     } else {
-      return NextResponse.json({ error: "NO_MESSAGES_LEFT" }, { status: 402 });
+      return NextResponse.json(
+        { error: "NO_MESSAGES_LEFT" },
+        { status: 402 }
+      );
     }
 
     // ─────────────────────────────────────────────
@@ -255,6 +276,9 @@ export async function POST(
     });
   } catch (err) {
     console.error("Chat route error:", err);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Server error" },
+      { status: 500 }
+    );
   }
 }
