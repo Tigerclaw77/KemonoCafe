@@ -44,6 +44,8 @@ export async function POST(req: NextRequest) {
 
   const session = event.data.object as Stripe.Checkout.Session;
 
+  console.log("WEBHOOK METADATA:", session.metadata);
+
   const userId = session.metadata?.userId;
   const companionId = session.metadata?.companionId ?? null;
   const purchaseType = session.metadata?.type;
@@ -84,6 +86,8 @@ export async function POST(req: NextRequest) {
     if (desc.includes("entree")) messagesToAdd += MESSAGE_VALUES.entree;
     if (desc.includes("dessert")) messagesToAdd += MESSAGE_VALUES.dessert;
   }
+
+  console.log("messagesToAdd:", messagesToAdd);
 
   if (messagesToAdd > 0) {
     await supabase.rpc("increment_messages", {
