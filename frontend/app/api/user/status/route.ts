@@ -44,13 +44,13 @@ export async function POST(req: NextRequest) {
     // 1) Banked messages
     // ─────────────────────────────────────
 
-    const { data: profile } = await supabase
-      .from("profiles")
+    const { data: balance } = await supabase
+      .from("message_balances")
       .select("remaining_messages")
-      .eq("id", userId)
+      .eq("user_id", userId)
       .maybeSingle();
 
-    const remainingMessages = profile?.remaining_messages ?? 0;
+    const remainingMessages = balance?.remaining_messages ?? 0;
 
     // ─────────────────────────────────────
     // 2) Daily free messages
