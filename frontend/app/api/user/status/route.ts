@@ -22,10 +22,10 @@ function isUuid(value: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = await req.json();
+    const { userId: authUserId } = await req.json();
 
     // Guest / invalid
-    if (!userId || !isUuid(userId)) {
+    if (!authUserId || !isUuid(authUserId)) {
       return NextResponse.json({
         remainingMessages: 0,
         hasNomination: false,
@@ -44,14 +44,13 @@ export async function POST(req: NextRequest) {
     // 🔑 Resolve APP user ID from auth user ID
     // ─────────────────────────────────────
 
-    const { data: userRow } = await supabase
+    const { data: userRow, error: userErr } = await supabase
       .from("users")
       .select("id")
-      .eq("auth_user_id", userId)
-      .maybeSingle();
+      .eq("auth_user_id", authUserId)
+      .single();
 
-    if (!userRow) {
-      // User not yet synced
+    if (userErr || !userRow) {
       return NextResponse.json({
         remainingMessages: 0,
         hasNomination: false,
@@ -107,7 +106,7 @@ export async function POST(req: NextRequest) {
     const hasDailyFreeAvailable = dailyFreeRemaining > 0;
 
     // ─────────────────────────────────────
-    // 3) Nomination (AUTHORITATIVE SOURCE)
+    // 3) Nomination (AUTHORITATIVE)
     // ─────────────────────────────────────
 
     const { data: companionRow } = await supabase
