@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.text();
-
   let event: Stripe.Event;
+
   try {
     event = stripe.webhooks.constructEvent(
       body,
@@ -45,23 +45,20 @@ export async function POST(req: NextRequest) {
   }
 
   const session = event.data.object as Stripe.Checkout.Session;
+  const metadata = session.metadata || {};
 
-  const metadata = session.metadata ?? {};
   const userId = metadata.userId;
   const companionId = metadata.companionId ?? null;
 
   if (!userId) {
-    console.error("❌ Missing metadata.userId", session.id);
+    console.error("❌ Missing metadata.userId");
     return NextResponse.json({ received: true });
   }
 
-  // ───────────────────────────────────────────────
-  // Step 1 – Nomination (robust detection)
-  // ───────────────────────────────────────────────
-  const isNomination =
-    metadata.type === "nomination" || metadata.nomination === "true";
-
-  if (isNomination) {
+  // ─────────────────────────────
+  // 1️⃣ Nomination (flag-based)
+  // ─────────────────────────────
+  if (metadata.nomination === "true") {
     const now = new Date();
     const expires = new Date(now);
 
@@ -83,30 +80,22 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("❌ Nomination upsert failed:", error);
+    } else {
+      console.log("✅ Nomination granted");
     }
-
-    return NextResponse.json({ received: true });
   }
 
-  // ───────────────────────────────────────────────
-  // Step 2 – Menu items → messages
-  // ───────────────────────────────────────────────
-  const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
-
+  // ─────────────────────────────
+  // 2️⃣ Messages (metadata-driven)
+  // ─────────────────────────────
   let messagesToAdd = 0;
 
-  for (const item of lineItems.data) {
-    const desc = item.description?.toLowerCase() || "";
+  if (metadata.hasFullCourse === "true") {
+    messagesToAdd += MESSAGE_VALUES.full_course;
+  }
 
-    if (desc.includes("full") && desc.includes("course")) {
-      messagesToAdd += MESSAGE_VALUES.full_course;
-      continue;
-    }
-
-    if (desc.includes("drink")) messagesToAdd += MESSAGE_VALUES.drink;
-    if (desc.includes("snack")) messagesToAdd += MESSAGE_VALUES.snack;
-    if (desc.includes("entree")) messagesToAdd += MESSAGE_VALUES.entree;
-    if (desc.includes("dessert")) messagesToAdd += MESSAGE_VALUES.dessert;
+  if (metadata.itemType && MESSAGE_VALUES[metadata.itemType]) {
+    messagesToAdd += MESSAGE_VALUES[metadata.itemType];
   }
 
   if (messagesToAdd > 0) {
@@ -117,6 +106,8 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("❌ Message increment failed:", error);
+    } else {
+      console.log(`✅ Added ${messagesToAdd} messages`);
     }
   }
 
