@@ -32,41 +32,14 @@ type ChatMessage = {
 const DAILY_FREE_LIMIT = 6;
 const GRACE_MS = 5 * 60_000;
 
-const CAFE_WORLD_PROMPT = `
-You are a server at Kemono Café.
-
-Rules:
-- You are one café companion among many.
-- You have coworkers, but you do NOT refer to yourself as your own coworker.
-- You do not invent menu items, prices, or variations.
-- Menu items are fixed; no substitutions or custom orders.
-- If asked about system mechanics, you may say:
-  "I'm not totally sure — the menu should explain it better."
-- Keep responses brand-safe and playful.
-
-Context:
-- This café has multiple animal-girl servers.
-- Each server knows the café exists and has coworkers.
-- Each server speaks only from her own perspective.
-`;
-
-const NAME_SAFETY_META_PROMPT = `
-If the user provides a name or nickname that is offensive, hateful, extremist,
-or clearly inappropriate to repeat, you must politely refuse to use it.
-
-Respond playfully and lightly, and suggest an alternative name based on a
-fictional literary character instead.
-
-Do not lecture, shame, or mention rules or policies.
-If the user provides a reasonable name afterward, accept it and move on.
-`;
-
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
 
 function isUuid(value: string): boolean {
-  return /^[0-9a-fA-F-]{36}$/.test(value);
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+    value
+  );
 }
 
 function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
@@ -120,11 +93,11 @@ function extractMemoryCandidate(userMessage: string) {
   };
 }
 
-async function loadMemories(userId: string, companionId: string) {
+async function loadMemories(appUserId: string, companionId: string) {
   const { data } = await serviceSupabase
     .from("companion_memories")
     .select("content")
-    .eq("user_id", userId)
+    .eq("user_id", appUserId)
     .eq("companion_id", companionId)
     .order("importance", { ascending: false })
     .order("created_at", { ascending: false })
@@ -134,7 +107,7 @@ async function loadMemories(userId: string, companionId: string) {
 }
 
 async function saveMemory(
-  userId: string,
+  appUserId: string,
   companionId: string,
   memory: {
     memory_type: "fact" | "preference" | "boundary";
@@ -143,7 +116,7 @@ async function saveMemory(
   }
 ) {
   await serviceSupabase.from("companion_memories").insert({
-    user_id: userId,
+    user_id: appUserId,
     companion_id: companionId,
     memory_type: memory.memory_type,
     content: memory.content,
@@ -172,39 +145,43 @@ export async function POST(
 
     const body = await req.json();
     const messages = body.messages as ChatMessage[] | undefined;
-    const userId = body.userId as string | undefined;
+    const authUserId = body.userId as string | undefined;
 
     if (!Array.isArray(messages)) {
       return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
     }
 
-    if (!userId || !isUuid(userId)) {
+    if (!authUserId || !isUuid(authUserId)) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
+
+    // ─────────────────────────────────────────────
+    // 🔑 Resolve AUTH user → APP user
+    // ─────────────────────────────────────────────
+
+    const { data: userRow } = await serviceSupabase
+      .from("users")
+      .select("id")
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
+
+    if (!userRow) {
+      return NextResponse.json(
+        { error: "USER_NOT_SYNCED" },
+        { status: 401 }
+      );
+    }
+
+    const appUserId = userRow.id;
 
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
     // ─────────────────────────────────────────────
-    // Ensure message balance row exists (SAFE)
+    // Load memories
     // ─────────────────────────────────────────────
 
-    // await serviceSupabase
-    //   .from("message_balances")
-    //   .upsert(
-    //     {
-    //       user_id: userId,
-    //       remaining_messages: 0,
-    //       updated_at: now.toISOString(),
-    //     },
-    //     { onConflict: "user_id" }
-    //   );
-
-    // ─────────────────────────────────────────────
-    // Load memories (MVP)
-    // ─────────────────────────────────────────────
-
-    const memories = await loadMemories(userId, companionId);
+    const memories = await loadMemories(appUserId, companionId);
 
     const memoryBlock =
       memories.length > 0
@@ -220,7 +197,7 @@ export async function POST(
     const { data: companionRow } = await serviceSupabase
       .from("companions")
       .select("id, nomination_expires_at, nomination_grace_used")
-      .eq("user_id", userId)
+      .eq("user_id", appUserId)
       .eq("character_id", companionId)
       .maybeSingle();
 
@@ -259,7 +236,7 @@ export async function POST(
     const { data: balanceRow } = await serviceSupabase
       .from("message_balances")
       .select("remaining_messages")
-      .eq("user_id", userId)
+      .eq("user_id", appUserId)
       .maybeSingle();
 
     let remainingMessages = balanceRow?.remaining_messages ?? 0;
@@ -267,12 +244,12 @@ export async function POST(
     let { data: stats } = await serviceSupabase
       .from("user_stats")
       .select("total_messages, daily_free_date, daily_free_used")
-      .eq("user_id", userId)
+      .eq("user_id", appUserId)
       .maybeSingle();
 
     if (!stats) {
       await serviceSupabase.from("user_stats").insert({
-        user_id: userId,
+        user_id: appUserId,
         total_messages: 0,
         daily_free_date: today,
         daily_free_used: 0,
@@ -306,8 +283,6 @@ export async function POST(
       }
     }
 
-    const menuContext = buildMenuContext();
-
     // ─────────────────────────────────────────────
     // OpenAI call
     // ─────────────────────────────────────────────
@@ -317,14 +292,13 @@ export async function POST(
       temperature: 0.9,
       max_tokens: 140,
       messages: [
-        { role: "system", content: CAFE_WORLD_PROMPT },
-        { role: "system", content: NAME_SAFETY_META_PROMPT },
+        { role: "system", content: buildMenuContext() },
         {
           role: "system",
           content:
             companion.systemPrompt +
             "\n\n" +
-            menuContext +
+            buildMenuContext() +
             "\n\n" +
             memoryBlock,
         },
@@ -337,7 +311,7 @@ export async function POST(
       "Mmm… I had trouble hearing that.";
 
     // ─────────────────────────────────────────────
-    // Save memory (MVP)
+    // Save memory
     // ─────────────────────────────────────────────
 
     const lastUserMessage = [...messages]
@@ -347,7 +321,7 @@ export async function POST(
     if (lastUserMessage) {
       const memoryCandidate = extractMemoryCandidate(lastUserMessage);
       if (memoryCandidate) {
-        await saveMemory(userId, companionId, memoryCandidate);
+        await saveMemory(appUserId, companionId, memoryCandidate);
       }
     }
 
@@ -371,7 +345,7 @@ export async function POST(
     await serviceSupabase
       .from("user_stats")
       .update(statsUpdate)
-      .eq("user_id", userId);
+      .eq("user_id", appUserId);
 
     if (!unlimitedActive && !useDailyFree) {
       const newRemaining = Math.max(remainingMessages - 1, 0);
@@ -382,7 +356,7 @@ export async function POST(
           remaining_messages: newRemaining,
           updated_at: now.toISOString(),
         })
-        .eq("user_id", userId);
+        .eq("user_id", appUserId);
 
       remainingMessages = newRemaining;
     }
