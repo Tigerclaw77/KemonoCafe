@@ -76,7 +76,10 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Companion not found" },
+        { status: 404 }
+      );
     }
 
     const body = (await req.json()) as {
@@ -106,7 +109,7 @@ export async function POST(
       return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
     }
 
-    const appUserId = userRow.id;
+    // const appUserId = userRow.id;
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
@@ -117,7 +120,7 @@ export async function POST(
     const { data: companionRow } = await supabase
       .from("companions")
       .select("id, nomination_expires_at, nomination_grace_used")
-      .eq("user_id", appUserId)
+      .eq("user_id", body.userId)
       .eq("character_id", companionId)
       .maybeSingle();
 
@@ -149,13 +152,13 @@ export async function POST(
     const { data: balanceRow } = await supabase
       .from("message_balances")
       .select("remaining_messages")
-      .eq("user_id", appUserId)
+      .eq("user_id", body.userId)
       .maybeSingle();
 
     // ensure row exists (write-only)
     await supabase.from("user_stats").upsert(
       {
-        user_id: appUserId,
+        user_id: body.userId,
         daily_free_date: today,
         daily_free_used: 0,
         last_visit_at: now.toISOString(),
@@ -166,7 +169,7 @@ export async function POST(
     const { data: statsRow } = await supabase
       .from("user_stats")
       .select("daily_free_date, daily_free_used")
-      .eq("user_id", appUserId)
+      .eq("user_id", body.userId)
       .maybeSingle();
 
     if (!statsRow) {
@@ -177,10 +180,7 @@ export async function POST(
     const dailyFreeUsed =
       statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
-    let dailyFreeRemaining = Math.max(
-      DAILY_FREE_LIMIT - dailyFreeUsed,
-      0
-    );
+    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
 
     // ─────────────────────────────────────────────
     // Decide consumption
@@ -229,7 +229,7 @@ export async function POST(
           daily_free_used: dailyFreeUsed + 1,
           last_visit_at: now.toISOString(),
         })
-        .eq("user_id", appUserId);
+        .eq("user_id", body.userId);
 
       dailyFreeRemaining -= 1;
     }
@@ -241,7 +241,7 @@ export async function POST(
           remaining_messages: Math.max(banked - 1, 0),
           updated_at: now.toISOString(),
         })
-        .eq("user_id", appUserId);
+        .eq("user_id", body.userId);
     }
 
     return NextResponse.json({
