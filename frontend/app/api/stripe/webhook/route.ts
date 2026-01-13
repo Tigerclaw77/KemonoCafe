@@ -22,8 +22,9 @@ const MESSAGE_VALUES: Record<string, number> = {
 
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
-  if (!sig)
+  if (!sig) {
     return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+  }
 
   const body = await req.text();
   let event: Stripe.Event;
@@ -47,11 +48,31 @@ export async function POST(req: NextRequest) {
 
   console.log("WEBHOOK METADATA:", session.metadata);
 
-  const userId = session.metadata?.userId;
+  // ⚠️ This is auth.users.id
+  const authUserId = session.metadata?.userId;
   const companionId = session.metadata?.companionId ?? null;
   const purchaseType = session.metadata?.type;
 
-  if (!userId) return NextResponse.json({ received: true });
+  if (!authUserId) {
+    console.error("Missing userId in Stripe metadata");
+    return NextResponse.json({ received: true });
+  }
+
+  // ─────────────────────────────────────────────
+  // 🔑 Translate auth.users.id → public.users.id
+  // ─────────────────────────────────────────────
+  const { data: userRow, error: userError } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", authUserId)
+    .single();
+
+  if (userError || !userRow) {
+    console.error("No public.users row for auth user:", authUserId, userError);
+    return NextResponse.json({ received: true });
+  }
+
+  const userId = userRow.id; // ✅ THIS is the ID message_balances expects
 
   // ───── Nomination ─────
   if (purchaseType === "nomination") {
@@ -60,14 +81,20 @@ export async function POST(req: NextRequest) {
     expires.setHours(3, 0, 0, 0);
     if (now.getHours() >= 3) expires.setDate(expires.getDate() + 1);
 
-    await supabase.from("nominations").upsert(
-      {
-        user_id: userId,
-        companion_id: companionId,
-        expires_at: expires.toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
+    const { error: nominationError } = await supabase
+      .from("nominations")
+      .upsert(
+        {
+          user_id: userId, // ✅ public.users.id
+          companion_id: companionId,
+          expires_at: expires.toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+
+    if (nominationError) {
+      console.error("Nomination upsert failed:", nominationError);
+    }
 
     return NextResponse.json({ received: true });
   }
@@ -78,6 +105,7 @@ export async function POST(req: NextRequest) {
 
   for (const item of lineItems.data) {
     const desc = item.description?.toLowerCase() || "";
+
     if (desc.includes("full") && desc.includes("course")) {
       messagesToAdd += MESSAGE_VALUES.full_course;
       continue;
@@ -89,13 +117,16 @@ export async function POST(req: NextRequest) {
   }
 
   console.log("messagesToAdd:", messagesToAdd);
-  console.log("SERVICE ROLE PRESENT:", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   if (messagesToAdd > 0) {
-    await supabase.rpc("increment_messages", {
-      user_id: userId,
+    const { error: rpcError } = await supabase.rpc("increment_messages", {
+      user_id: userId, // ✅ public.users.id
       amount: messagesToAdd,
     });
+
+    if (rpcError) {
+      console.error("increment_messages failed:", rpcError);
+    }
   }
 
   return NextResponse.json({ received: true });
