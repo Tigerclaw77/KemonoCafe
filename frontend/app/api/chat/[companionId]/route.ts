@@ -38,9 +38,7 @@ function isUuid(value: string): boolean {
   return /^[0-9a-fA-F-]{36}$/.test(value);
 }
 
-function mapCharacterToCompanion(
-  character: CharacterConfig
-): CompanionConfig {
+function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
@@ -78,7 +76,10 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Companion not found" },
+        { status: 404 }
+      );
     }
 
     const body = (await req.json()) as {
@@ -177,14 +178,9 @@ export async function POST(
     const banked = balanceRow?.remaining_messages ?? 0;
 
     const dailyFreeUsed =
-      statsRow.daily_free_date === today
-        ? statsRow.daily_free_used
-        : 0;
+      statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
-    let dailyFreeRemaining = Math.max(
-      DAILY_FREE_LIMIT - dailyFreeUsed,
-      0
-    );
+    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
 
     // ─────────────────────────────────────────────
     // Decide consumption
@@ -257,8 +253,29 @@ export async function POST(
       hasDailyFreeAvailable: dailyFreeRemaining > 0,
       dailyFreeRemaining,
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Chat route error:", err);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+
+    let detail = "Unknown error";
+
+    if (err instanceof Error) {
+      detail = err.message;
+    } else if (
+      typeof err === "object" &&
+      err !== null &&
+      "error" in err &&
+      typeof (err as { error?: { message?: string } }).error?.message ===
+        "string"
+    ) {
+      detail = (err as { error: { message: string } }).error.message;
+    }
+
+    return NextResponse.json(
+      {
+        error: "Server error",
+        detail,
+      },
+      { status: 500 }
+    );
   }
 }
