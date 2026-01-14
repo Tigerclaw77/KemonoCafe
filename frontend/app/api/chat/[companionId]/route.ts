@@ -73,7 +73,10 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Companion not found" },
+        { status: 404 }
+      );
     }
 
     const body = (await req.json()) as {
@@ -168,6 +171,7 @@ export async function POST(
     }
 
     const banked = balanceRow?.remaining_messages ?? 0;
+
     const dailyFreeUsed =
       statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
@@ -186,6 +190,10 @@ export async function POST(
     else {
       return NextResponse.json({ error: "NO_MESSAGES_LEFT" }, { status: 402 });
     }
+
+    // ✅ AUTHORITATIVE SEND PERMISSION
+    const canSend =
+      unlimited || dailyFreeRemaining > 0 || banked > 0;
 
     // ─────────── OpenAI ───────────
 
@@ -231,12 +239,16 @@ export async function POST(
 
     return NextResponse.json({
       reply,
+
       remainingMessages:
         consume === "BANKED" ? Math.max(banked - 1, 0) : banked,
+
+      dailyFreeRemaining,
+      hasDailyFreeAvailable: dailyFreeRemaining > 0,
+
+      canSend, // ← FIXES RESERVE + CTA BUG
       hasNomination: unlimited,
       nominationJustEnded,
-      hasDailyFreeAvailable: dailyFreeRemaining > 0,
-      dailyFreeRemaining,
     });
   } catch (err) {
     console.error("Chat route error:", err);
