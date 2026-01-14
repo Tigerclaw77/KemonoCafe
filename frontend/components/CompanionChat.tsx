@@ -1080,18 +1080,30 @@ export default function CompanionChat({
       const raw = await safeReadResponse<ChatApiResponse>(res);
 
       if (!res.ok) {
-        const errCode = raw && isApiError(raw) ? raw.error : null;
-
-        if (errCode === "NO_MESSAGES_LEFT") {
+        if (
+          res.status === 402 &&
+          raw &&
+          typeof raw === "object" &&
+          "blocked" in raw
+        ) {
           setShowLimitWarning(true);
+
+          const obj = raw as Record<string, unknown>;
+          setRemainingMessages(
+            typeof obj.remainingMessages === "number"
+              ? obj.remainingMessages
+              : 0
+          );
+
           setHasDailyFreeAvailable(false);
           setDailyFreeRemaining(0);
+
           appendBossLineIfNeeded();
           return;
         }
 
         console.error("Chat API error:", raw);
-        throw new Error(errCode ?? "Chat failed");
+        throw new Error("Chat failed");
       }
 
       if (!raw || isApiError(raw)) {
