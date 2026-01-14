@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { companionId: string } }
+  context: { params: Promise<{ companionId: string }> }
 ) {
+  const { companionId } = await context.params;
+
   return NextResponse.json({
     ok: true,
-    companionId: params.companionId,
+    companionId,
     messages: [],
     hasHistory: false,
   });
