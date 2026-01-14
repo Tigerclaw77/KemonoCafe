@@ -1173,6 +1173,11 @@ export default function CompanionChat({
         )
       );
 
+      if ((newRemaining ?? 0) > 0) {
+        setShowLimitWarning(false);
+        setHasShownBossLine(false);
+      }
+
       const updatedBanked = newRemaining;
 
       const updatedFree =
@@ -1191,11 +1196,16 @@ export default function CompanionChat({
 
       const stillNominationOrGrace = newHasNomination || graceStillActive;
 
-      if (
-        !stillNominationOrGrace &&
-        (remainingMessages ?? 0) <= 0 &&
-        (!hasDailyFreeAvailable || (dailyFreeRemaining ?? 0) <= 0)
-      ) {
+      const apiBanked =
+        typeof data.remainingMessages === "number" ? data.remainingMessages : 0;
+      const apiFree =
+        typeof data.dailyFreeRemaining === "number"
+          ? data.dailyFreeRemaining
+          : 0;
+
+      const apiEffectiveRemaining = apiBanked + apiFree;
+
+      if (!stillNominationOrGrace && apiEffectiveRemaining <= 0) {
         appendBossLineIfNeeded();
       }
     } catch (err) {
@@ -1358,7 +1368,12 @@ export default function CompanionChat({
     ? isSending || guestFreeRemaining === null
     : isSending ||
       !effectiveUserId ||
-      (!nominationOrGraceActive && (remainingMessages ?? 0) <= 0);
+      (!nominationOrGraceActive &&
+        (remainingMessages ?? 0) +
+          (hasDailyFreeAvailable && dailyFreeRemaining !== null
+            ? dailyFreeRemaining
+            : 0) <=
+          0);
 
   useEffect(() => {
     if (!inputDisabled && textareaRef.current) {
