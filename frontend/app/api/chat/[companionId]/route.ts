@@ -14,13 +14,18 @@ import {
   type CharacterConfig,
 } from "../../../../config";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const ROUTE_VERSION = "chat-route-2026-01-14-v3"; // bump to verify prod deploy
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-side only
 );
 
 type ChatMessage = {
@@ -34,7 +39,9 @@ const GRACE_MS = 5 * 60_000;
 // ───────────────────────── Helpers ─────────────────────────
 
 function isUuid(v: string) {
-  return /^[0-9a-fA-F-]{36}$/.test(v);
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+    v
+  );
 }
 
 function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
@@ -62,162 +69,183 @@ function resolveCompanion(id: string): CompanionConfig | null {
   );
 }
 
+// Use the SAME “today” format everywhere (UTC date string YYYY-MM-DD)
+function getUtcTodayString(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
 // ───────────────────────── Route ─────────────────────────
 
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ companionId: string }> }
 ) {
+  const resHeaders = new Headers();
+  resHeaders.set("x-chat-route-version", ROUTE_VERSION);
+
   try {
+    console.log("🔥 CHAT ROUTE LIVE:", ROUTE_VERSION);
+
     const { companionId } = await ctx.params;
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Companion not found" },
+        { status: 404, headers: resHeaders }
+      );
     }
 
     const body = (await req.json()) as {
       messages?: ChatMessage[];
-      userId?: string; // auth user id
+      userId?: string; // auth_user_id (uuid)
     };
 
     if (!Array.isArray(body.messages)) {
-      return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid messages" },
+        { status: 400, headers: resHeaders }
+      );
     }
 
     if (!body.userId || !isUuid(body.userId)) {
-      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+      return NextResponse.json(
+        { error: "UNAUTHENTICATED" },
+        { status: 401, headers: resHeaders }
+      );
     }
 
-    const authUserId = body.userId;
     const now = new Date();
-    const today = now.toISOString().slice(0, 10);
+    const today = getUtcTodayString(now);
 
     // ─────────── Resolve AUTH → APP user ───────────
 
-    const { data: userRow } = await supabase
+    const { data: userRow, error: userErr } = await supabase
       .from("users")
       .select("id")
-      .eq("auth_user_id", authUserId)
+      .eq("auth_user_id", body.userId)
       .maybeSingle();
 
-    if (!userRow) {
-      return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
+    if (userErr) {
+      console.error("User lookup error:", userErr);
+      return NextResponse.json(
+        { error: "USER_LOOKUP_FAILED" },
+        { status: 500, headers: resHeaders }
+      );
+    }
+
+    if (!userRow?.id) {
+      return NextResponse.json(
+        { error: "USER_NOT_SYNCED" },
+        { status: 401, headers: resHeaders }
+      );
     }
 
     const appUserId = userRow.id;
 
     // ─────────── Nomination ───────────
-    // NOTE: This assumes companions.user_id stores APP user id.
 
-    const { data: companionRow } = await supabase
+    const { data: companionRow, error: compErr } = await supabase
       .from("companions")
       .select("id, nomination_expires_at, nomination_grace_used")
       .eq("user_id", appUserId)
       .eq("character_id", companionId)
       .maybeSingle();
 
-    let hasNomination = false;
+    if (compErr) {
+      console.error("Companion lookup error:", compErr);
+      return NextResponse.json(
+        { error: "COMPANION_LOOKUP_FAILED" },
+        { status: 500, headers: resHeaders }
+      );
+    }
+
+    let unlimited = false;
     let nominationJustEnded = false;
 
-    let nominationExpiresAt: string | null = null;
-    let nominationGraceEndsAt: string | null = null;
-
     if (companionRow?.nomination_expires_at) {
-      nominationExpiresAt = companionRow.nomination_expires_at;
-
       const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
       const graceEndMs = expiresMs + GRACE_MS;
-      nominationGraceEndsAt = new Date(graceEndMs).toISOString();
-
       const nowMs = now.getTime();
 
       if (nowMs <= expiresMs) {
-        hasNomination = true;
+        unlimited = true;
       } else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
-        // within grace window (first time only)
-        hasNomination = true;
-
-        // Your existing meaning: "grace just triggered / started being used"
+        unlimited = true;
         nominationJustEnded = true;
 
-        await supabase
+        const { error: graceErr } = await supabase
           .from("companions")
           .update({ nomination_grace_used: true })
           .eq("id", companionRow.id);
+
+        if (graceErr) console.error("Grace update error:", graceErr);
       }
     }
 
-    // ─────────── Message balances ───────────
-    // IMPORTANT: message_balances.user_id stores APP user id
+    // ─────────── Banked messages ───────────
 
-    const { data: balanceRow } = await supabase
+    const { data: balanceRow, error: balErr } = await supabase
       .from("message_balances")
       .select("remaining_messages")
       .eq("user_id", appUserId)
       .maybeSingle();
 
+    if (balErr) console.error("Balance lookup error:", balErr);
+
     const banked = balanceRow?.remaining_messages ?? 0;
 
-    // ─────────── user_stats ───────────
-    // IMPORTANT: user_stats.user_id stores APP user id
-    // Also: include daily_free_date so we can reset correctly.
+    // ─────────── Daily free messages (READ-ONLY, NULL-SAFE) ───────────
 
-    let { data: statsRow } = await supabase
+    const { data: statsRow, error: statsErr } = await supabase
       .from("user_stats")
-      .select("daily_free_date, daily_free_used")
+      .select("daily_free_used, daily_free_date")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    if (!statsRow) {
-      await supabase.from("user_stats").insert({
-        user_id: appUserId,
-        daily_free_date: today,
-        daily_free_used: 0,
-        last_visit_at: now.toISOString(),
-      });
-
-      const retry = await supabase
-        .from("user_stats")
-        .select("daily_free_date, daily_free_used")
-        .eq("user_id", appUserId)
-        .single();
-
-      statsRow = retry.data!;
+    if (statsErr) {
+      console.error("Stats select error:", statsErr);
     }
 
-    const dailyFreeUsed =
-      statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
+    const statsDate: string | null = statsRow?.daily_free_date ?? null;
+    const statsUsed: number = statsRow?.daily_free_used ?? 0;
+
+    const dailyFreeUsed = statsDate === today ? statsUsed : 0;
 
     let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
 
-    // ─────────── Decide consumption (AUTHORITATIVE) ───────────
+    console.log("[CHAT DAILY FREE]", {
+      authUserId: body.userId,
+      appUserId,
+      today,
+      statsDate,
+      statsUsed,
+      dailyFreeUsed,
+      dailyFreeRemaining,
+      unlimited,
+      banked,
+    });
+
+    // ─────────── Decide consumption ───────────
 
     let consume: "UNLIMITED" | "FREE" | "BANKED" | null = null;
 
-    if (hasNomination) consume = "UNLIMITED";
+    if (unlimited) consume = "UNLIMITED";
     else if (dailyFreeRemaining > 0) consume = "FREE";
     else if (banked > 0) consume = "BANKED";
 
-    // 🚫 HARD STOP — NOTHING BELOW RUNS
     if (!consume) {
       return NextResponse.json(
         {
           blocked: true,
           reason: "NO_MESSAGES_LEFT",
-
-          // keep response shape consistent for frontend
-          reply: "",
           remainingMessages: banked,
           dailyFreeRemaining: 0,
           hasDailyFreeAvailable: false,
-
           hasNomination: false,
-          nominationExpiresAt,
-          nominationGraceEndsAt,
           nominationJustEnded: false,
         },
-        { status: 402 }
+        { status: 402, headers: resHeaders }
       );
     }
 
@@ -239,9 +267,10 @@ export async function POST(
       "Mmm… I had trouble hearing that.";
 
     // ─────────── Persist usage ───────────
+    // NOTE: We DO NOT reset daily stats here. Only decrement on actual FREE consumption.
 
     if (consume === "FREE") {
-      await supabase
+      const { error: updErr } = await supabase
         .from("user_stats")
         .update({
           daily_free_used: dailyFreeUsed + 1,
@@ -250,38 +279,38 @@ export async function POST(
         })
         .eq("user_id", appUserId);
 
-      dailyFreeRemaining -= 1;
+      if (updErr) console.error("Stats update error:", updErr);
+
+      dailyFreeRemaining = Math.max(dailyFreeRemaining - 1, 0);
     }
 
     if (consume === "BANKED") {
-      await supabase
+      const { error: updBalErr } = await supabase
         .from("message_balances")
         .update({
           remaining_messages: Math.max(banked - 1, 0),
           updated_at: now.toISOString(),
         })
         .eq("user_id", appUserId);
+
+      if (updBalErr) console.error("Balance update error:", updBalErr);
     }
 
     // ─────────── Response ───────────
 
-    const remainingMessages =
-      consume === "BANKED" ? Math.max(banked - 1, 0) : banked;
-
-    return NextResponse.json({
-      reply,
-
-      remainingMessages,
-      dailyFreeRemaining,
-      hasDailyFreeAvailable: dailyFreeRemaining > 0,
-
-      blocked: false,
-
-      hasNomination,
-      nominationExpiresAt,
-      nominationGraceEndsAt,
-      nominationJustEnded,
-    });
+    return NextResponse.json(
+      {
+        reply,
+        remainingMessages:
+          consume === "BANKED" ? Math.max(banked - 1, 0) : banked,
+        dailyFreeRemaining,
+        hasDailyFreeAvailable: dailyFreeRemaining > 0,
+        blocked: false,
+        hasNomination: unlimited,
+        nominationJustEnded,
+      },
+      { status: 200, headers: resHeaders }
+    );
   } catch (err) {
     console.error("Chat route error:", err);
     return NextResponse.json(
@@ -289,7 +318,7 @@ export async function POST(
         error: "Server error",
         detail: err instanceof Error ? err.message : "Unknown error",
       },
-      { status: 500 }
+      { status: 500, headers: resHeaders }
     );
   }
 }

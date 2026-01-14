@@ -125,6 +125,28 @@ function isApiError(value: unknown): value is { error: string } {
   return hasStringProp(value, "error");
 }
 
+async function fetchChatHistory(
+  companionId: string,
+  userId: string
+): Promise<Message[] | null> {
+  try {
+    const res = await fetch(`/api/chat/${companionId}/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    if (!data?.ok || !Array.isArray(data.messages)) return null;
+
+    return data.messages as Message[];
+  } catch {
+    return null;
+  }
+}
+
 // 5-minute warning line (pre-expiry CTA)
 function buildNominationWarningLine(companion: CompanionConfig): string {
   const key = getCompanionKey(companion);
@@ -489,21 +511,6 @@ export default function CompanionChat({
 
   const [messages, setMessages] = useState<Message[]>([]);
 
-  // useEffect(() => {
-  //   if (!authChecked) return;
-
-  //   // Only inject default welcome for GUESTS
-  //   if (isGuest && messages.length === 0) {
-  //     setMessages([
-  //       {
-  //         id: "welcome",
-  //         role: "assistant",
-  //         content: `Welcome to Kemono Cafe! I’m ${companion.name}, your hostess today. Please, have a seat—what would you like to talk about? ♡`,
-  //       },
-  //     ]);
-  //   }
-  // }, [authChecked, isGuest]);
-
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
 
@@ -544,7 +551,7 @@ export default function CompanionChat({
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-
+  const hasLoadedStatusRef = useRef(false);
   const hasAttemptedSendRef = useRef(false);
 
   const router = useRouter();
@@ -553,31 +560,49 @@ export default function CompanionChat({
     if (!authChecked) return;
     if (typeof window === "undefined") return;
 
-    const storageKey = getChatStorageKey(companion.id, effectiveUserId);
-    const raw = window.localStorage.getItem(storageKey);
+    let cancelled = false;
 
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Message[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
+    async function loadHistory() {
+      // 1️⃣ Logged-in → try server history first
+      if (effectiveUserId) {
+        const history = await fetchChatHistory(companion.id, effectiveUserId);
+
+        if (!cancelled && history && history.length > 0) {
+          setMessages(history);
           return;
         }
-      } catch {
-        // fall through
+      }
+
+      // 2️⃣ Fallback → localStorage (guests or safety net)
+      const storageKey = getChatStorageKey(companion.id, effectiveUserId);
+      const raw = window.localStorage.getItem(storageKey);
+
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Message[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+            return;
+          }
+        } catch {}
+      }
+
+      // 3️⃣ Final fallback → welcome line
+      if (!justVerified) {
+        setMessages([
+          {
+            id: `welcome-${Date.now()}`,
+            role: "assistant",
+            content: `Welcome to Kemono Cafe! I’m ${companion.name}, your hostess today. Please, have a seat—what would you like to talk about? ♡`,
+          },
+        ]);
       }
     }
 
-    // No saved history → intro
-    if (!justVerified) {
-      setMessages([
-        {
-          id: `welcome-${Date.now()}`,
-          role: "assistant",
-          content: `Welcome to Kemono Cafe! I’m ${companion.name}, your hostess today. Please, have a seat—what would you like to talk about? ♡`,
-        },
-      ]);
-    }
+    loadHistory();
+    return () => {
+      cancelled = true;
+    };
   }, [authChecked, effectiveUserId, companion.id, companion.name]);
 
   const [verifiedWelcomeShown, setVerifiedWelcomeShown] = useState(false);
@@ -709,8 +734,93 @@ export default function CompanionChat({
   };
 
   // 2) Logged-in: load status from backend
+  // useEffect(() => {
+  //   // 🔒 Do nothing until auth is fully resolved
+  //   if (!authChecked) return;
+
+  //   // Logged out / guest reset
+  //   if (!effectiveUserId) {
+  //     setRemainingMessages(null);
+  //     setHasNominationActive(false);
+  //     setNominationExpiresAt(null);
+  //     setNominationGraceEndsAt(null);
+  //     setHasDailyFreeAvailable(false);
+  //     setDailyFreeRemaining(null);
+  //     setShowLimitWarning(false);
+  //     setHasShownBossLine(false);
+  //     setHasShownNominationWarning(false);
+  //     return;
+  //   }
+
+  //   if (hasLoadedStatusRef.current) return;
+  //   hasLoadedStatusRef.current = true;
+
+  //   let aborted = false;
+
+  //   console.log("[FETCH STATUS EFFECT]", effectiveUserId);
+
+  //   async function fetchStatus() {
+  //     try {
+  //       const res = await fetch("/api/user/status", {
+  //         method: "POST",
+  //         headers: { "Content-Type": "application/json" },
+  //         body: JSON.stringify({ userId: effectiveUserId }),
+  //       });
+
+  //       if (!res.ok) {
+  //         const rawErr = await safeReadResponse<UserStatusResponse>(res);
+  //         console.error("Failed to load user status:", rawErr);
+  //         return;
+  //       }
+
+  //       const data = await safeReadResponse<UserStatusResponse>(res);
+  //       if (aborted || !data) return;
+
+  //       if (isApiError(data)) {
+  //         console.error("Status response error:", data.error);
+  //         return;
+  //       }
+
+  //       console.log("[STATUS DATA]", data);
+
+  //       setRemainingMessages(
+  //         typeof data.remainingMessages === "number"
+  //           ? data.remainingMessages
+  //           : 0
+  //       );
+
+  //       const hasNom = !!data.hasNomination;
+  //       setHasNominationActive(hasNom);
+  //       setNominationExpiresAt(data.nominationExpiresAt ?? null);
+  //       setNominationGraceEndsAt(
+  //         typeof data.nominationGraceEndsAt === "string"
+  //           ? data.nominationGraceEndsAt
+  //           : null
+  //       );
+  //       setHasDailyFreeAvailable(!!data.hasDailyFreeAvailable);
+  //       setDailyFreeRemaining(
+  //         normalizeDailyFree(
+  //           !!data.hasDailyFreeAvailable,
+  //           data.dailyFreeRemaining
+  //         )
+  //       );
+
+  //       if (!hasNom) setHasShownNominationWarning(false);
+
+  //       hasAttemptedSendRef.current = false;
+  //     } catch (err) {
+  //       if (!aborted) console.error("Status fetch error:", err);
+  //     }
+  //   }
+
+  //   fetchStatus();
+
+  //   return () => {
+  //     aborted = true;
+  //   };
+  // }, [effectiveUserId, authChecked]);
+
   useEffect(() => {
-    // 🔒 Do nothing until auth is fully resolved
     if (!authChecked) return;
 
     // Logged out / guest reset
@@ -724,12 +834,15 @@ export default function CompanionChat({
       setShowLimitWarning(false);
       setHasShownBossLine(false);
       setHasShownNominationWarning(false);
+      hasLoadedStatusRef.current = false;
       return;
     }
 
-    let aborted = false;
+    // 🚫 Prevent re-loading (THIS FIXES “STUCK AT 5”)
+    if (hasLoadedStatusRef.current) return;
+    hasLoadedStatusRef.current = true;
 
-    console.log("[FETCH STATUS EFFECT]", effectiveUserId);
+    let aborted = false;
 
     async function fetchStatus() {
       try {
@@ -739,36 +852,17 @@ export default function CompanionChat({
           body: JSON.stringify({ userId: effectiveUserId }),
         });
 
-        if (!res.ok) {
-          const rawErr = await safeReadResponse<UserStatusResponse>(res);
-          console.error("Failed to load user status:", rawErr);
-          return;
-        }
-
         const data = await safeReadResponse<UserStatusResponse>(res);
-        if (aborted || !data) return;
-
-        if (isApiError(data)) {
-          console.error("Status response error:", data.error);
-          return;
-        }
-
-        console.log("[STATUS DATA]", data);
+        if (aborted || !data || isApiError(data)) return;
 
         setRemainingMessages(
           typeof data.remainingMessages === "number"
             ? data.remainingMessages
             : 0
         );
-
-        const hasNom = !!data.hasNomination;
-        setHasNominationActive(hasNom);
+        setHasNominationActive(!!data.hasNomination);
         setNominationExpiresAt(data.nominationExpiresAt ?? null);
-        setNominationGraceEndsAt(
-          typeof data.nominationGraceEndsAt === "string"
-            ? data.nominationGraceEndsAt
-            : null
-        );
+        setNominationGraceEndsAt(data.nominationGraceEndsAt ?? null);
         setHasDailyFreeAvailable(!!data.hasDailyFreeAvailable);
         setDailyFreeRemaining(
           normalizeDailyFree(
@@ -776,21 +870,16 @@ export default function CompanionChat({
             data.dailyFreeRemaining
           )
         );
-
-        if (!hasNom) setHasShownNominationWarning(false);
-
-        hasAttemptedSendRef.current = false;
       } catch (err) {
-        if (!aborted) console.error("Status fetch error:", err);
+        console.error("Status fetch error:", err);
       }
     }
 
     fetchStatus();
-
     return () => {
       aborted = true;
     };
-  }, [effectiveUserId, authChecked]);
+  }, [authChecked, effectiveUserId]);
 
   // Scroll chat to bottom on new messages
   useEffect(() => {
