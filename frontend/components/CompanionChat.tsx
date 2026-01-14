@@ -1181,8 +1181,8 @@ export default function CompanionChat({
 
       if (
         !stillNominationOrGrace &&
-        updatedEffective !== null &&
-        updatedEffective <= 0
+        (remainingMessages ?? 0) <= 0 &&
+        (!hasDailyFreeAvailable || (dailyFreeRemaining ?? 0) <= 0)
       ) {
         appendBossLineIfNeeded();
       }
