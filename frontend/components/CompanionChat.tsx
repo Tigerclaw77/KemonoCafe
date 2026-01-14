@@ -1084,7 +1084,6 @@ export default function CompanionChat({
 
         if (errCode === "NO_MESSAGES_LEFT") {
           setShowLimitWarning(true);
-          setRemainingMessages(0);
           setHasDailyFreeAvailable(false);
           setDailyFreeRemaining(0);
           appendBossLineIfNeeded();
