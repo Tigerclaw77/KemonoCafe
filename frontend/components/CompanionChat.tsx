@@ -1347,7 +1347,7 @@ export default function CompanionChat({
     ? isSending || guestFreeRemaining === null
     : isSending ||
       !effectiveUserId ||
-      (!nominationOrGraceActive && loggedInEffectiveRemaining <= 0);
+      (!nominationOrGraceActive && (remainingMessages ?? 0) <= 0);
 
   useEffect(() => {
     if (!inputDisabled && textareaRef.current) {
