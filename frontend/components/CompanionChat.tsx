@@ -962,9 +962,7 @@ export default function CompanionChat({
 
   // 3) Send message – guest vs logged-in
   const sendMessage = async () => {
-    // ✅ mark that the user actually tried to send
     hasAttemptedSendRef.current = true;
-
     setErrorText(null);
 
     if (!authChecked) return;
@@ -1105,7 +1103,10 @@ export default function CompanionChat({
           setHasDailyFreeAvailable(false);
           setDailyFreeRemaining(0);
 
-          appendBossLineIfNeeded();
+          // if (hasAttemptedSendRef.current) {
+          //   appendBossLineIfNeeded();
+          // }
+
           return;
         }
 
