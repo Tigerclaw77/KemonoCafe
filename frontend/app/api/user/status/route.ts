@@ -77,17 +77,18 @@ export async function POST(req: NextRequest) {
     // Daily free messages (AUTHORITATIVE)
     // ─────────────────────────────────────
 
+    const today = new Date().toISOString().slice(0, 10);
+
     const { data: stats } = await supabase
       .from("user_stats")
-      .select("daily_free_used")
+      .select("daily_free_used, daily_free_date")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    const dailyFreeUsed = stats?.daily_free_used ?? 0;
-    const dailyFreeRemaining = Math.max(
-      DAILY_FREE_LIMIT - dailyFreeUsed,
-      0
-    );
+    const dailyFreeUsed =
+      stats && stats.daily_free_date === today ? stats.daily_free_used : 0;
+
+    const dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
 
     const hasDailyFreeAvailable = dailyFreeRemaining > 0;
 
@@ -106,9 +107,7 @@ export async function POST(req: NextRequest) {
     let nominationGraceEndsAt: string | null = null;
 
     if (companionRow?.nomination_expires_at) {
-      const expiresMs = new Date(
-        companionRow.nomination_expires_at
-      ).getTime();
+      const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
 
       const graceEndMs = expiresMs + GRACE_MS;
 

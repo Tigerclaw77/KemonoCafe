@@ -1,3 +1,5 @@
+// frontend/app/api/chat/[companionId]/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
@@ -35,9 +37,7 @@ function isUuid(v: string) {
   return /^[0-9a-fA-F-]{36}$/.test(v);
 }
 
-function mapCharacterToCompanion(
-  character: CharacterConfig
-): CompanionConfig {
+function mapCharacterToCompanion(character: CharacterConfig): CompanionConfig {
   return {
     id: character.id,
     name: character.name,
@@ -73,15 +73,12 @@ export async function POST(
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
-      return NextResponse.json(
-        { error: "Companion not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Companion not found" }, { status: 404 });
     }
 
     const body = (await req.json()) as {
       messages?: ChatMessage[];
-      userId?: string;
+      userId?: string; // auth user id
     };
 
     if (!Array.isArray(body.messages)) {
@@ -92,42 +89,56 @@ export async function POST(
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
 
+    const authUserId = body.userId;
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
-    // ─────────── Resolve user ───────────
+    // ─────────── Resolve AUTH → APP user ───────────
 
     const { data: userRow } = await supabase
       .from("users")
       .select("id")
-      .eq("auth_user_id", body.userId)
+      .eq("auth_user_id", authUserId)
       .maybeSingle();
 
     if (!userRow) {
       return NextResponse.json({ error: "USER_NOT_SYNCED" }, { status: 401 });
     }
 
+    const appUserId = userRow.id;
+
     // ─────────── Nomination ───────────
+    // NOTE: This assumes companions.user_id stores APP user id.
 
     const { data: companionRow } = await supabase
       .from("companions")
       .select("id, nomination_expires_at, nomination_grace_used")
-      .eq("user_id", body.userId)
+      .eq("user_id", appUserId)
       .eq("character_id", companionId)
       .maybeSingle();
 
-    let unlimited = false;
+    let hasNomination = false;
     let nominationJustEnded = false;
 
+    let nominationExpiresAt: string | null = null;
+    let nominationGraceEndsAt: string | null = null;
+
     if (companionRow?.nomination_expires_at) {
+      nominationExpiresAt = companionRow.nomination_expires_at;
+
       const expiresMs = new Date(companionRow.nomination_expires_at).getTime();
       const graceEndMs = expiresMs + GRACE_MS;
+      nominationGraceEndsAt = new Date(graceEndMs).toISOString();
+
       const nowMs = now.getTime();
 
       if (nowMs <= expiresMs) {
-        unlimited = true;
+        hasNomination = true;
       } else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
-        unlimited = true;
+        // within grace window (first time only)
+        hasNomination = true;
+
+        // Your existing meaning: "grace just triggered / started being used"
         nominationJustEnded = true;
 
         await supabase
@@ -138,26 +149,29 @@ export async function POST(
     }
 
     // ─────────── Message balances ───────────
+    // IMPORTANT: message_balances.user_id stores APP user id
 
     const { data: balanceRow } = await supabase
       .from("message_balances")
       .select("remaining_messages")
-      .eq("user_id", body.userId)
+      .eq("user_id", appUserId)
       .maybeSingle();
 
     const banked = balanceRow?.remaining_messages ?? 0;
 
-    // ─────────── user_stats (create-once) ───────────
+    // ─────────── user_stats ───────────
+    // IMPORTANT: user_stats.user_id stores APP user id
+    // Also: include daily_free_date so we can reset correctly.
 
     let { data: statsRow } = await supabase
       .from("user_stats")
       .select("daily_free_date, daily_free_used")
-      .eq("user_id", body.userId)
+      .eq("user_id", appUserId)
       .maybeSingle();
 
     if (!statsRow) {
       await supabase.from("user_stats").insert({
-        user_id: body.userId,
+        user_id: appUserId,
         daily_free_date: today,
         daily_free_used: 0,
         last_visit_at: now.toISOString(),
@@ -166,7 +180,7 @@ export async function POST(
       const retry = await supabase
         .from("user_stats")
         .select("daily_free_date, daily_free_used")
-        .eq("user_id", body.userId)
+        .eq("user_id", appUserId)
         .single();
 
       statsRow = retry.data!;
@@ -175,16 +189,13 @@ export async function POST(
     const dailyFreeUsed =
       statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
-    let dailyFreeRemaining = Math.max(
-      DAILY_FREE_LIMIT - dailyFreeUsed,
-      0
-    );
+    let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
 
     // ─────────── Decide consumption (AUTHORITATIVE) ───────────
 
     let consume: "UNLIMITED" | "FREE" | "BANKED" | null = null;
 
-    if (unlimited) consume = "UNLIMITED";
+    if (hasNomination) consume = "UNLIMITED";
     else if (dailyFreeRemaining > 0) consume = "FREE";
     else if (banked > 0) consume = "BANKED";
 
@@ -194,15 +205,23 @@ export async function POST(
         {
           blocked: true,
           reason: "NO_MESSAGES_LEFT",
-          dailyFreeRemaining: 0,
+
+          // keep response shape consistent for frontend
+          reply: "",
           remainingMessages: banked,
+          dailyFreeRemaining: 0,
+          hasDailyFreeAvailable: false,
+
           hasNomination: false,
+          nominationExpiresAt,
+          nominationGraceEndsAt,
+          nominationJustEnded: false,
         },
         { status: 402 }
       );
     }
 
-    // ─────────── OpenAI (SAFE) ───────────
+    // ─────────── OpenAI ───────────
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -229,7 +248,7 @@ export async function POST(
           daily_free_date: today,
           last_visit_at: now.toISOString(),
         })
-        .eq("user_id", body.userId);
+        .eq("user_id", appUserId);
 
       dailyFreeRemaining -= 1;
     }
@@ -241,22 +260,26 @@ export async function POST(
           remaining_messages: Math.max(banked - 1, 0),
           updated_at: now.toISOString(),
         })
-        .eq("user_id", body.userId);
+        .eq("user_id", appUserId);
     }
 
     // ─────────── Response ───────────
 
+    const remainingMessages =
+      consume === "BANKED" ? Math.max(banked - 1, 0) : banked;
+
     return NextResponse.json({
       reply,
 
-      remainingMessages:
-        consume === "BANKED" ? Math.max(banked - 1, 0) : banked,
-
+      remainingMessages,
       dailyFreeRemaining,
       hasDailyFreeAvailable: dailyFreeRemaining > 0,
 
       blocked: false,
-      hasNomination: unlimited,
+
+      hasNomination,
+      nominationExpiresAt,
+      nominationGraceEndsAt,
       nominationJustEnded,
     });
   } catch (err) {
