@@ -137,13 +137,15 @@ export async function POST(
       }
     }
 
-    // ─────────── Balances ───────────
+    // ─────────── Message balances ───────────
 
     const { data: balanceRow } = await supabase
       .from("message_balances")
       .select("remaining_messages")
       .eq("user_id", body.userId)
       .maybeSingle();
+
+    const banked = balanceRow?.remaining_messages ?? 0;
 
     // ─────────── user_stats (create-once) ───────────
 
@@ -170,8 +172,6 @@ export async function POST(
       statsRow = retry.data!;
     }
 
-    const banked = balanceRow?.remaining_messages ?? 0;
-
     const dailyFreeUsed =
       statsRow.daily_free_date === today ? statsRow.daily_free_used : 0;
 
@@ -180,22 +180,29 @@ export async function POST(
       0
     );
 
-    // ─────────── Decide consumption ───────────
+    // ─────────── Decide consumption (AUTHORITATIVE) ───────────
 
-    let consume: "UNLIMITED" | "FREE" | "BANKED";
+    let consume: "UNLIMITED" | "FREE" | "BANKED" | null = null;
 
     if (unlimited) consume = "UNLIMITED";
     else if (dailyFreeRemaining > 0) consume = "FREE";
     else if (banked > 0) consume = "BANKED";
-    else {
-      return NextResponse.json({ error: "NO_MESSAGES_LEFT" }, { status: 402 });
+
+    // 🚫 HARD STOP — NOTHING BELOW RUNS
+    if (!consume) {
+      return NextResponse.json(
+        {
+          blocked: true,
+          reason: "NO_MESSAGES_LEFT",
+          dailyFreeRemaining: 0,
+          remainingMessages: banked,
+          hasNomination: false,
+        },
+        { status: 402 }
+      );
     }
 
-    // ✅ AUTHORITATIVE SEND PERMISSION
-    const canSend =
-      unlimited || dailyFreeRemaining > 0 || banked > 0;
-
-    // ─────────── OpenAI ───────────
+    // ─────────── OpenAI (SAFE) ───────────
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -237,6 +244,8 @@ export async function POST(
         .eq("user_id", body.userId);
     }
 
+    // ─────────── Response ───────────
+
     return NextResponse.json({
       reply,
 
@@ -246,7 +255,7 @@ export async function POST(
       dailyFreeRemaining,
       hasDailyFreeAvailable: dailyFreeRemaining > 0,
 
-      canSend, // ← FIXES RESERVE + CTA BUG
+      blocked: false,
       hasNomination: unlimited,
       nominationJustEnded,
     });
