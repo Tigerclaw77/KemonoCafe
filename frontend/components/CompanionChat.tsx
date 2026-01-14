@@ -1103,10 +1103,6 @@ export default function CompanionChat({
           setHasDailyFreeAvailable(false);
           setDailyFreeRemaining(0);
 
-          // if (hasAttemptedSendRef.current) {
-          //   appendBossLineIfNeeded();
-          // }
-
           return;
         }
 
