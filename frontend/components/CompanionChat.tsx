@@ -545,6 +545,8 @@ export default function CompanionChat({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
+  const hasAttemptedSendRef = useRef(false);
+
   const router = useRouter();
 
   useEffect(() => {
@@ -776,6 +778,8 @@ export default function CompanionChat({
         );
 
         if (!hasNom) setHasShownNominationWarning(false);
+
+        hasAttemptedSendRef.current = false;
       } catch (err) {
         if (!aborted) console.error("Status fetch error:", err);
       }
@@ -958,6 +962,9 @@ export default function CompanionChat({
 
   // 3) Send message – guest vs logged-in
   const sendMessage = async () => {
+    // ✅ mark that the user actually tried to send
+    hasAttemptedSendRef.current = true;
+
     setErrorText(null);
 
     if (!authChecked) return;
@@ -1205,7 +1212,11 @@ export default function CompanionChat({
 
       const apiEffectiveRemaining = apiBanked + apiFree;
 
-      if (!stillNominationOrGrace && apiEffectiveRemaining <= 0) {
+      if (
+        hasAttemptedSendRef.current &&
+        !stillNominationOrGrace &&
+        apiEffectiveRemaining <= 0
+      ) {
         appendBossLineIfNeeded();
       }
     } catch (err) {
@@ -1368,12 +1379,7 @@ export default function CompanionChat({
     ? isSending || guestFreeRemaining === null
     : isSending ||
       !effectiveUserId ||
-      (!nominationOrGraceActive &&
-        (remainingMessages ?? 0) +
-          (hasDailyFreeAvailable && dailyFreeRemaining !== null
-            ? dailyFreeRemaining
-            : 0) <=
-          0);
+      (!nominationOrGraceActive && loggedInEffectiveRemaining <= 0);
 
   useEffect(() => {
     if (!inputDisabled && textareaRef.current) {
