@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { geistSans, geistMono } from "../lib/fonts";
 import AuthBootstrap from "../components/AuthBootstrap";
+import { Analytics } from "@vercel/analytics/react";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({
         <AuthBootstrap />
         {children}
         <Footer />
+        <Analytics />
       </body>
     </html>
   );

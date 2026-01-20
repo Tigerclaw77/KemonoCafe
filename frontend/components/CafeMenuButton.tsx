@@ -2,10 +2,10 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { supabase } from "../lib/supabaseClient";
-import { groupMenuByCategory } from "../config/menu";
+import { supabase } from "@/lib/supabaseClient";
+import { groupMenuByCategory } from "@/config/menu";
 import MenuItemCard from "./MenuItemCard";
-import { parisienne } from "../lib/fonts";
+import { parisienne } from "@/lib/fonts";
 
 interface CafeMenuButtonProps {
   companionId: string;

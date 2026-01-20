@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
  * This exists so Next.js sees this file as a valid module.
  * You can expand this later to actually sync Supabase user data.
  */
-export async function POST(req: NextRequest) {
+export async function POST(_req: NextRequest) {
   return NextResponse.json(
     {
       status: "ok",
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 }
 
 // Optional: allow GET as well (handy for quick testing)
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   return NextResponse.json(
     {
       status: "ok",

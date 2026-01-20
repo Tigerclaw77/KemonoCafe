@@ -2,9 +2,8 @@
 
 import { notFound } from "next/navigation";
 
-import CafeHeader from "../../components/CafeHeader";
+import CafeHeader from "@/components/CafeHeader";
 import CompanionChat from "../../components/CompanionChat";
-import CafeMenuButton from "../../components/CafeMenuButton";
 import CompanionProfileHero from "../../components/CompanionProfileHero";
 
 import {

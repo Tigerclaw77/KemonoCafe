@@ -24,17 +24,6 @@ function isUuid(value: string): boolean {
   );
 }
 
-// YYYY-MM-DD in chosen timezone (NOT UTC)
-function getTodayStrInTimeZone(tz: string): string {
-  // en-CA gives YYYY-MM-DD
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
 export async function POST(req: NextRequest) {
   try {
     const { userId: authUserId } = await req.json();
@@ -141,7 +130,6 @@ export async function POST(req: NextRequest) {
     }
 
     const currentUsed = stats2?.daily_free_used ?? 0;
-    const currentDate = stats2?.daily_free_date ?? null;
 
     const dailyFreeUsed = currentUsed;
 

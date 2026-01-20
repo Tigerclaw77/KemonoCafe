@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import HeaderAuthStatus from "./HeaderAuthStatus";
+import HeaderAuthStatus from "@/components/HeaderAuthStatus";
 
 export default function CafeHeader() {
   return (

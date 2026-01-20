@@ -1,6 +1,5 @@
 // frontend/app/page.tsx
 
-import Link from "next/link";
 import CompanionGrid from "../components/CompanionGrid";
 import CafeHeader from "@/components/CafeHeader";
 
