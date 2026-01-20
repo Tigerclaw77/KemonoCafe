@@ -17,7 +17,7 @@ import {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ROUTE_VERSION = "chat-route-2026-01-14-v3"; // bump to verify prod deploy
+const ROUTE_VERSION = "chat-route-2026-01-20-v4"; // bump
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -25,7 +25,7 @@ const openai = new OpenAI({
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-side only
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 type ChatMessage = {
@@ -40,7 +40,7 @@ const GRACE_MS = 5 * 60_000;
 
 function isUuid(v: string) {
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-    v
+    v,
   );
 }
 
@@ -69,7 +69,6 @@ function resolveCompanion(id: string): CompanionConfig | null {
   );
 }
 
-// Use the SAME “today” format everywhere (UTC date string YYYY-MM-DD)
 function getUtcTodayString(d: Date) {
   return d.toISOString().slice(0, 10);
 }
@@ -78,40 +77,38 @@ function getUtcTodayString(d: Date) {
 
 export async function POST(
   req: NextRequest,
-  ctx: { params: Promise<{ companionId: string }> }
+  ctx: { params: Promise<{ companionId: string }> },
 ) {
   const resHeaders = new Headers();
   resHeaders.set("x-chat-route-version", ROUTE_VERSION);
 
   try {
-    console.log("🔥 CHAT ROUTE LIVE:", ROUTE_VERSION);
-
     const { companionId } = await ctx.params;
     const companion = resolveCompanion(companionId);
 
     if (!companion) {
       return NextResponse.json(
         { error: "Companion not found" },
-        { status: 404, headers: resHeaders }
+        { status: 404, headers: resHeaders },
       );
     }
 
     const body = (await req.json()) as {
       messages?: ChatMessage[];
-      userId?: string; // auth_user_id (uuid)
+      userId?: string;
     };
 
     if (!Array.isArray(body.messages)) {
       return NextResponse.json(
         { error: "Invalid messages" },
-        { status: 400, headers: resHeaders }
+        { status: 400, headers: resHeaders },
       );
     }
 
     if (!body.userId || !isUuid(body.userId)) {
       return NextResponse.json(
         { error: "UNAUTHENTICATED" },
-        { status: 401, headers: resHeaders }
+        { status: 401, headers: resHeaders },
       );
     }
 
@@ -120,24 +117,16 @@ export async function POST(
 
     // ─────────── Resolve AUTH → APP user ───────────
 
-    const { data: userRow, error: userErr } = await supabase
+    const { data: userRow } = await supabase
       .from("users")
       .select("id")
       .eq("auth_user_id", body.userId)
       .maybeSingle();
 
-    if (userErr) {
-      console.error("User lookup error:", userErr);
-      return NextResponse.json(
-        { error: "USER_LOOKUP_FAILED" },
-        { status: 500, headers: resHeaders }
-      );
-    }
-
     if (!userRow?.id) {
       return NextResponse.json(
         { error: "USER_NOT_SYNCED" },
-        { status: 401, headers: resHeaders }
+        { status: 401, headers: resHeaders },
       );
     }
 
@@ -145,20 +134,12 @@ export async function POST(
 
     // ─────────── Nomination ───────────
 
-    const { data: companionRow, error: compErr } = await supabase
+    const { data: companionRow } = await supabase
       .from("companions")
       .select("id, nomination_expires_at, nomination_grace_used")
       .eq("user_id", appUserId)
       .eq("character_id", companionId)
       .maybeSingle();
-
-    if (compErr) {
-      console.error("Companion lookup error:", compErr);
-      return NextResponse.json(
-        { error: "COMPANION_LOOKUP_FAILED" },
-        { status: 500, headers: resHeaders }
-      );
-    }
 
     let unlimited = false;
     let nominationJustEnded = false;
@@ -168,63 +149,54 @@ export async function POST(
       const graceEndMs = expiresMs + GRACE_MS;
       const nowMs = now.getTime();
 
-      if (nowMs <= expiresMs) {
-        unlimited = true;
-      } else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
+      if (nowMs <= expiresMs) unlimited = true;
+      else if (!companionRow.nomination_grace_used && nowMs <= graceEndMs) {
         unlimited = true;
         nominationJustEnded = true;
 
-        const { error: graceErr } = await supabase
+        await supabase
           .from("companions")
           .update({ nomination_grace_used: true })
           .eq("id", companionRow.id);
-
-        if (graceErr) console.error("Grace update error:", graceErr);
       }
     }
 
     // ─────────── Banked messages ───────────
 
-    const { data: balanceRow, error: balErr } = await supabase
+    const { data: balanceRow } = await supabase
       .from("message_balances")
       .select("remaining_messages")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    if (balErr) console.error("Balance lookup error:", balErr);
-
     const banked = balanceRow?.remaining_messages ?? 0;
 
-    // ─────────── Daily free messages (READ-ONLY, NULL-SAFE) ───────────
+    // ─────────── Daily free messages (RESET + CONSUME SAFE) ───────────
 
-    const { data: statsRow, error: statsErr } = await supabase
+    const { data: statsRow } = await supabase
       .from("user_stats")
       .select("daily_free_used, daily_free_date")
       .eq("user_id", appUserId)
       .maybeSingle();
 
-    if (statsErr) {
-      console.error("Stats select error:", statsErr);
+    let dailyFreeUsed = statsRow?.daily_free_used ?? 0;
+    const statsDate = statsRow?.daily_free_date ?? null;
+
+    // ✅ NEW: persist reset if date changed
+    if (statsDate !== today) {
+      await supabase
+        .from("user_stats")
+        .update({
+          daily_free_used: 0,
+          daily_free_date: today,
+          last_visit_at: now.toISOString(),
+        })
+        .eq("user_id", appUserId);
+
+      dailyFreeUsed = 0;
     }
 
-    const statsDate: string | null = statsRow?.daily_free_date ?? null;
-    const statsUsed: number = statsRow?.daily_free_used ?? 0;
-
-    const dailyFreeUsed = statsDate === today ? statsUsed : 0;
-
     let dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
-
-    console.log("[CHAT DAILY FREE]", {
-      authUserId: body.userId,
-      appUserId,
-      today,
-      statsDate,
-      statsUsed,
-      dailyFreeUsed,
-      dailyFreeRemaining,
-      unlimited,
-      banked,
-    });
 
     // ─────────── Decide consumption ───────────
 
@@ -245,8 +217,27 @@ export async function POST(
           hasNomination: false,
           nominationJustEnded: false,
         },
-        { status: 402, headers: resHeaders }
+        { status: 402, headers: resHeaders },
       );
+    }
+
+    // ─────────── Persist USER message ───────────
+
+    const lastUserMessage = body.messages.at(-1);
+
+    if (lastUserMessage?.role === "user") {
+      const { error: userMsgErr } = await supabase
+        .from("chat_messages")
+        .insert({
+          user_id: appUserId,
+          companion_id: companionId,
+          role: "user",
+          content: lastUserMessage.content,
+        });
+
+      if (userMsgErr) {
+        console.error("[chat_messages] user insert failed:", userMsgErr);
+      }
     }
 
     // ─────────── OpenAI ───────────
@@ -266,11 +257,28 @@ export async function POST(
       completion.choices[0]?.message?.content ??
       "Mmm… I had trouble hearing that.";
 
+    // ─────────── Persist ASSISTANT message ───────────
+
+    const { error: assistantMsgErr } = await supabase
+      .from("chat_messages")
+      .insert({
+        user_id: appUserId,
+        companion_id: companionId,
+        role: "assistant",
+        content: reply,
+      });
+
+    if (assistantMsgErr) {
+      console.error(
+        "[chat_messages] assistant insert failed:",
+        assistantMsgErr,
+      );
+    }
+
     // ─────────── Persist usage ───────────
-    // NOTE: We DO NOT reset daily stats here. Only decrement on actual FREE consumption.
 
     if (consume === "FREE") {
-      const { error: updErr } = await supabase
+      await supabase
         .from("user_stats")
         .update({
           daily_free_used: dailyFreeUsed + 1,
@@ -279,24 +287,18 @@ export async function POST(
         })
         .eq("user_id", appUserId);
 
-      if (updErr) console.error("Stats update error:", updErr);
-
       dailyFreeRemaining = Math.max(dailyFreeRemaining - 1, 0);
     }
 
     if (consume === "BANKED") {
-      const { error: updBalErr } = await supabase
+      await supabase
         .from("message_balances")
         .update({
           remaining_messages: Math.max(banked - 1, 0),
           updated_at: now.toISOString(),
         })
         .eq("user_id", appUserId);
-
-      if (updBalErr) console.error("Balance update error:", updBalErr);
     }
-
-    // ─────────── Response ───────────
 
     return NextResponse.json(
       {
@@ -309,16 +311,13 @@ export async function POST(
         hasNomination: unlimited,
         nominationJustEnded,
       },
-      { status: 200, headers: resHeaders }
+      { status: 200, headers: resHeaders },
     );
   } catch (err) {
     console.error("Chat route error:", err);
     return NextResponse.json(
-      {
-        error: "Server error",
-        detail: err instanceof Error ? err.message : "Unknown error",
-      },
-      { status: 500, headers: resHeaders }
+      { error: "Server error" },
+      { status: 500, headers: resHeaders },
     );
   }
 }

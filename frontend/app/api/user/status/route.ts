@@ -14,8 +14,8 @@ const supabase = createClient(
 const DAILY_FREE_LIMIT = 6;
 const GRACE_MS = 5 * 60_000;
 
-// ✅ pick a single app timezone for “daily free” boundaries
-// Change this if you want (but keep it consistent everywhere).
+// NOTE: timezone label retained for future use.
+// Today we normalize to YYYY-MM-DD UTC consistently everywhere.
 const APP_TIMEZONE = "America/Chicago";
 
 function isUuid(value: string): boolean {
@@ -24,11 +24,18 @@ function isUuid(value: string): boolean {
   );
 }
 
+function getTodayKey(): string {
+  // Single source of truth for “daily” boundary
+  return new Date().toISOString().slice(0, 10);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId: authUserId } = await req.json();
 
-    // Guest / invalid
+    // ─────────────────────────────────────
+    // Guest / invalid auth
+    // ─────────────────────────────────────
     if (!authUserId || !isUuid(authUserId)) {
       return NextResponse.json({
         remainingMessages: 0,
@@ -42,7 +49,7 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
     const nowMs = Date.now();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayKey();
 
     // ─────────────────────────────────────
     // Resolve AUTH → APP user
@@ -88,7 +95,6 @@ export async function POST(req: NextRequest) {
     // ─────────────────────────────────────
     // Daily free messages (AUTHORITATIVE)
     // ─────────────────────────────────────
-    // ✅ Ensure the stats row EXISTS (no silent “update 0 rows”)
     const { data: statsRow, error: statsErr } = await supabase
       .from("user_stats")
       .select("daily_free_used, daily_free_date")
@@ -99,7 +105,7 @@ export async function POST(req: NextRequest) {
       console.error("[user/status] user_stats lookup error:", statsErr);
     }
 
-    // If missing row, create it (upsert)
+    // Ensure row exists (first-time user safety)
     if (!statsRow) {
       const { error: upsertErr } = await supabase
         .from("user_stats")
@@ -118,7 +124,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Re-read after possible upsert so we have stable values
+    // Re-read to get authoritative values
     const { data: stats2, error: stats2Err } = await supabase
       .from("user_stats")
       .select("daily_free_used, daily_free_date")
@@ -129,33 +135,35 @@ export async function POST(req: NextRequest) {
       console.error("[user/status] user_stats re-read error:", stats2Err);
     }
 
-    const currentUsed = stats2?.daily_free_used ?? 0;
+    let dailyFreeUsed = stats2?.daily_free_used ?? 0;
+    const lastDate = stats2?.daily_free_date ?? null;
 
-    const dailyFreeUsed = currentUsed;
+    // ✅ HARD RESET when calendar day changes
+    if (lastDate !== today) {
+      const { error: resetErr } = await supabase
+        .from("user_stats")
+        .update({
+          daily_free_used: 0,
+          daily_free_date: today,
+          last_visit_at: nowIso,
+        })
+        .eq("user_id", appUserId);
 
-    // ✅ Daily reset in APP_TIMEZONE
-    // if (currentDate !== today) {
-    //   const { error: resetErr } = await supabase
-    //     .from("user_stats")
-    //     .update({
-    //       daily_free_used: 0,
-    //       daily_free_date: today,
-    //       last_visit_at: nowIso,
-    //     })
-    //     .eq("user_id", appUserId);
+      if (resetErr) {
+        console.error("[user/status] Daily free reset error:", resetErr);
+      }
 
-    //   if (resetErr) {
-    //     console.error("[user/status] Daily free reset error:", resetErr);
-    //   }
+      dailyFreeUsed = 0;
+    }
 
-    //   dailyFreeUsed = 0;
-    // }
-
-    const dailyFreeRemaining = Math.max(DAILY_FREE_LIMIT - dailyFreeUsed, 0);
+    const dailyFreeRemaining = Math.max(
+      DAILY_FREE_LIMIT - dailyFreeUsed,
+      0
+    );
     const hasDailyFreeAvailable = dailyFreeRemaining > 0;
 
     // ─────────────────────────────────────
-    // Nomination (AUTHORITATIVE-ish)
+    // Nomination logic (unchanged)
     // ─────────────────────────────────────
     const { data: companionRow, error: nomErr } = await supabase
       .from("companions")
@@ -209,7 +217,7 @@ export async function POST(req: NextRequest) {
       dailyFreeRemaining,
     });
   } catch (err) {
-    console.error("User status error:", err);
+    console.error("[user/status] fatal error:", err);
     return NextResponse.json(
       { error: "Failed to load user status" },
       { status: 500 }

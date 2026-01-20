@@ -4,7 +4,7 @@ import "./globals.css";
 import { geistSans, geistMono } from "../lib/fonts";
 import AuthBootstrap from "../components/AuthBootstrap";
 import { Analytics } from "@vercel/analytics/react";
-import Footer from "@/components/Footer";
+import Footer from "../components/Footer";
 
 export const metadata: Metadata = {
   title: "Kemono Cafe",
