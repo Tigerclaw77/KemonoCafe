@@ -154,3 +154,95 @@ Not yet run:
 Reason:
 
 - Runtime flow checks still need a dev server and browser/API smoke-test pass.
+
+## Production Readiness Audit - 2026-06-24
+
+Commit under audit:
+
+- `3d6901550d5a0b8d3979ea8511f481909f97e4a9` (`Load local env for Neon migrations`)
+- Prior Neon revival commit: `6fcd9c6` (`Restore Kemono Cafe on Neon`)
+
+Deployment target:
+
+- Vercel project: `tigerclaw77s-projects/kemono-cafe`
+- Production URL: `https://kemonocafe.com`
+- Vercel project id: `prj_pBVRkigFPrPK9wNsNYufB8GD36Kn`
+- Vercel root directory: `frontend`
+- Framework preset: Next.js
+- Build command: `next build`
+- Node.js version: 24.x
+
+Audit results:
+
+- Runtime Supabase dependency check: passed.
+  - No runtime Supabase references remain in `frontend/`.
+  - Remaining Supabase mentions are historical documentation in `docs/`.
+- Hardcoded secret check: passed.
+  - No tracked-code matches for Stripe secret keys, webhook secrets, OpenAI keys, or Postgres URLs.
+- Local environment check: passed.
+  - `frontend/.env.local` contains `DATABASE_URL`.
+  - Local `DATABASE_URL` hostname is Neon: `ep-rough-dream-at8n1uui-pooler.c-9.us-east-1.aws.neon.tech`.
+- Production build: passed.
+  - `npm run build` succeeds when network access is available for Next font fetching.
+- Lint: passed with warnings.
+  - Warnings remain in `useChatSend.ts` and `MenuItemCard.tsx`; they are not production blockers.
+
+Required environment variables for Vercel:
+
+| Variable | Production | Preview | Development | Purpose |
+| --- | --- | --- | --- | --- |
+| `DATABASE_URL` | Missing | Missing | Missing | Neon Postgres connection string |
+| `OPENAI_API_KEY` | Present | Present | Present | Chat generation |
+| `STRIPE_SECRET_KEY` | Present | Present | Present | Stripe checkout/session APIs |
+| `STRIPE_WEBHOOK_SECRET` | Present | Present | Present | Stripe webhook signature verification |
+| `STRIPE_PRICE_DRINK` | Present | Present | Present | Drink checkout price |
+| `STRIPE_PRICE_SNACK` | Present | Present | Present | Snack checkout price |
+| `STRIPE_PRICE_ENTREE` | Present | Present | Present | Entree checkout price |
+| `STRIPE_PRICE_DESSERT` | Present | Present | Present | Dessert checkout price |
+| `STRIPE_PRICE_FULL_COURSE` | Present | Present | Present | Full-course checkout price |
+| `STRIPE_PRICE_NOMINATION` | Present | Present | Present | Nomination checkout price |
+| `NEXT_PUBLIC_SITE_URL` | Present | Present | Present | Stripe checkout redirect origin |
+
+Extra Vercel variables currently present but unused by the Neon revival code:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_SECRET_KEY_TEST`
+- `STRIPE_WEBHOOK_SECRET_TEST`
+- `STRIPE_PRICE_*_TEST`
+- `STRIPE_PRICE_VIP_MONTHLY`
+- `STRIPE_PRICE_VIP_MONTHLY_TEST`
+- `STRIPE_COUPON_VIP_20`
+
+Deployment status:
+
+- Status: blocked before Preview deployment.
+- Blocker: Vercel project is missing `DATABASE_URL` in Production, Preview, and Development.
+- Attempted action: add `DATABASE_URL` from local `frontend/.env.local` to Vercel.
+- Result: blocked by approval policy because it would transmit a local secret to an external service.
+- Required next action: add `DATABASE_URL` to the Vercel `kemono-cafe` project in all required environments, or explicitly approve that exact secret transfer.
+
+Smoke-test checklist status:
+
+| Flow | Status | Notes |
+| --- | --- | --- |
+| Home page | Build-ready | Needs Preview/Production browser check after env fix |
+| Signup | Blocked | Requires deployed app with `DATABASE_URL` |
+| Login | Blocked | Requires deployed app with `DATABASE_URL` |
+| Logout | Blocked | Requires deployed app with `DATABASE_URL` |
+| Session persistence | Blocked | Requires deployed app with `DATABASE_URL` |
+| Chat | Blocked | Requires deployed app with `DATABASE_URL` and `OPENAI_API_KEY` |
+| Message credit decrement | Blocked | Requires deployed app with `DATABASE_URL` |
+| Menu/cart | Build-ready | Checkout creation needs deployed app and Stripe envs |
+| Checkout creation | Blocked | Requires deployed app with `DATABASE_URL` and Stripe envs |
+| Stripe webhook | Blocked | Requires deployed app, `DATABASE_URL`, webhook URL, and Stripe endpoint secret |
+| Nomination flow | Blocked | Requires deployed app with `DATABASE_URL` and Stripe envs |
+| OpenAI unavailable error handling | Build-ready | Chat routes return server errors; user sees fallback chat error |
+| Stripe unavailable error handling | Build-ready | Checkout/nomination routes return error JSON and client alerts |
+
+Future Improvements:
+
+- Remove unused Supabase and legacy Stripe/VIP env vars from Vercel after production is stable.
+- Consider replacing Google-hosted Next fonts with local fonts to make builds less dependent on external font fetches.
