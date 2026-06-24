@@ -74,13 +74,10 @@ Implementation sequence:
 
 ## Blockers
 
-- Live route validation is blocked locally because `frontend/.env.local` does not include `DATABASE_URL`.
 - Supabase env vars are still present locally, but runtime code no longer reads them.
 
 ## Remaining Tasks
 
-- Add `DATABASE_URL` in local/deploy environments.
-- Run `npm run db:migrate` against the Neon database.
 - Smoke test runtime flows against that database.
 - Commit logical changes.
 
@@ -135,10 +132,14 @@ Completed:
   - Result: passed after allowing network access for Next font fetching.
 - Ran `node --check scripts/migrate-neon.mjs`.
   - Result: passed.
+- Updated `npm run db:migrate` so it automatically loads `frontend/.env.local`.
+- Ran `npm run db:migrate`.
+  - Result: passed after allowing network access to Neon.
+  - Applied `001_neon_minimum.sql`.
+  - Verified `DATABASE_URL` was read from `frontend/.env.local`; the first sandboxed run reached a Neon connection attempt instead of failing for a missing URL.
 
 Not yet run:
 
-- `npm run db:migrate`
 - signup
 - login
 - logout
@@ -152,4 +153,4 @@ Not yet run:
 
 Reason:
 
-- These runtime checks require a configured Neon `DATABASE_URL`.
+- Runtime flow checks still need a dev server and browser/API smoke-test pass.
