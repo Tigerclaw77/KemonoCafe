@@ -1,8 +1,7 @@
 // frontend/app/page.tsx
 
-import Link from "next/link";
 import CompanionGrid from "../components/CompanionGrid";
-import CafeHeader from "@/components/CafeHeader";
+import CafeHeader from "@/products/kemonoCafe/CafeHeader";
 
 export default function HomePage() {
   return (

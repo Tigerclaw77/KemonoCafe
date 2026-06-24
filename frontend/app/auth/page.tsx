@@ -2,8 +2,6 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AuthApiError } from "@supabase/supabase-js";
-import { supabase } from "../../lib/supabaseClient";
 
 export default function AuthPage() {
   const router = useRouter();
@@ -15,98 +13,37 @@ export default function AuthPage() {
   const [userContext, setUserContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
   const isLogin = mode === "login";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setInfo(null);
     setLoading(true);
 
     try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
+      const res = await fetch(isLogin ? "/api/auth/login" : "/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           email,
           password,
-        });
-
-        if (error) throw error;
-        router.push("/");
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        if (data.user) {
-          await supabase.from("profiles").insert({
-            id: data.user.id,
-            display_name: displayName || null,
-            user_context: userContext || null,
-          });
-        }
-
-        router.push("/");
-      }
-    } catch (err: unknown) {
-      console.error("Auth error:", err);
-
-      if (err instanceof AuthApiError) {
-        if (isLogin && err.status === 400) {
-          setError("Incorrect email or password.");
-        } else if (err.status === 429) {
-          setError("Too many attempts. Please wait and try again.");
-        } else {
-          setError(err.message);
-        }
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Something went wrong.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleMagicLink = async () => {
-    setError(null);
-    setInfo(null);
-
-    if (!email) {
-      setError("Please enter your email first.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
-        },
+          displayName,
+          userContext,
+        }),
       });
 
-      if (error) throw error;
-      setInfo("Magic login link sent. Please check your email.");
-    } catch (err: unknown) {
-      console.error("Magic-link error:", err);
+      const data: { error?: string } = await res.json();
 
-      if (err instanceof AuthApiError) {
-        if (err.status === 429) {
-          setError("Too many magic link requests. Please wait.");
-        } else {
-          setError(err.message);
-        }
-      } else if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Could not send magic link.");
+      if (!res.ok) {
+        throw new Error(data.error ?? "Authentication failed.");
       }
+
+      router.push("/");
+      router.refresh();
+    } catch (err: unknown) {
+      console.error("Auth error:", err);
+      setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -116,7 +53,7 @@ export default function AuthPage() {
     <main className="min-h-screen bg-cafe-gradient flex items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white/90 backdrop-blur-sm border border-pink-100 shadow-sm p-6">
         <h1 className="text-xl font-semibold text-slate-800 mb-1 text-center">
-          {isLogin ? "Welcome back to Kemono Cafe" : "Create your café account"}
+          {isLogin ? "Welcome back to Kemono Cafe" : "Create your cafe account"}
         </h1>
 
         <p className="text-xs text-slate-500 mb-4 text-center">
@@ -125,7 +62,6 @@ export default function AuthPage() {
             : "Register to save your companions and unlock nominations across devices."}
         </p>
 
-        {/* Mode toggle */}
         <div className="flex justify-center mb-4">
           <button
             type="button"
@@ -180,21 +116,21 @@ export default function AuthPage() {
           <div>
             <input
               type="password"
-              required={!isLogin}
+              required
+              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-pink-300"
             />
-            {isLogin && (
-              <p className="mt-1 text-[10px] text-slate-500">
-                Not required for magic link login
-              </p>
-            )}
+            <p className="mt-1 text-[10px] text-slate-500">
+              {isLogin
+                ? "Use the password for your Kemono Cafe account."
+                : "Use at least 8 characters."}
+            </p>
           </div>
 
           {error && <p className="text-[11px] text-red-500">{error}</p>}
-          {info && <p className="text-[11px] text-emerald-600">{info}</p>}
 
           <button
             type="submit"
@@ -203,24 +139,13 @@ export default function AuthPage() {
           >
             {loading
               ? isLogin
-                ? "Logging in…"
-                : "Creating account…"
+                ? "Logging in..."
+                : "Creating account..."
               : isLogin
-              ? "Log in with password"
+              ? "Log in"
               : "Register"}
           </button>
         </form>
-
-        {isLogin && (
-          <button
-            type="button"
-            onClick={handleMagicLink}
-            disabled={loading}
-            className="w-full mt-3 rounded-full border border-pink-300 bg-white px-4 py-2 text-xs font-semibold text-pink-600 hover:bg-pink-50 disabled:opacity-50"
-          >
-            {loading ? "Sending link…" : "Send me a magic login link"}
-          </button>
-        )}
       </div>
     </main>
   );

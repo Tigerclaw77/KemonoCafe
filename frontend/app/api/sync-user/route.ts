@@ -1,30 +1,25 @@
 // frontend/app/api/sync-user/route.ts
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { ensureUserDefaults, getCurrentUser } from "@/lib/auth";
 
-/**
- * Temporary stub for /api/sync-user
- *
- * This exists so Next.js sees this file as a valid module.
- * You can expand this later to actually sync Supabase user data.
- */
-export async function POST(req: NextRequest) {
-  return NextResponse.json(
-    {
-      status: "ok",
-      message: "sync-user endpoint is not implemented yet.",
-    },
-    { status: 200 }
-  );
+export const runtime = "nodejs";
+
+async function syncCurrentUser() {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  }
+
+  await ensureUserDefaults(user.id);
+  return NextResponse.json({ status: "ok", user });
 }
 
-// Optional: allow GET as well (handy for quick testing)
-export async function GET(req: NextRequest) {
-  return NextResponse.json(
-    {
-      status: "ok",
-      message: "sync-user endpoint is not implemented yet.",
-    },
-    { status: 200 }
-  );
+export async function POST() {
+  return syncCurrentUser();
+}
+
+export async function GET() {
+  return syncCurrentUser();
 }

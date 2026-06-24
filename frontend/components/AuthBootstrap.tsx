@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { supabase } from "../lib/supabaseClient";
 
 export default function AuthBootstrap() {
   useEffect(() => {
-    supabase.auth.getSession();
+    fetch("/api/auth/me", { cache: "no-store" }).catch(() => {});
   }, []);
 
   return null;

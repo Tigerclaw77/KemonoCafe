@@ -2,10 +2,9 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { supabase } from "../lib/supabaseClient";
-import { groupMenuByCategory } from "../config/menu";
+import { groupMenuByCategory } from "@/config/menu";
 import MenuItemCard from "./MenuItemCard";
-import { parisienne } from "../lib/fonts";
+import { parisienne } from "@/lib/fonts";
 
 interface CafeMenuButtonProps {
   companionId: string;
@@ -51,11 +50,12 @@ export default function CafeMenuButton({
         return;
       }
 
-      const { data, error } = await supabase.auth.getUser();
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const data: { user?: { id?: string } | null } = await res.json();
 
       if (!mounted) return;
 
-      if (!error && data?.user?.id) {
+      if (data?.user?.id) {
         setResolvedUserId(data.user.id);
       } else {
         setResolvedUserId(undefined);

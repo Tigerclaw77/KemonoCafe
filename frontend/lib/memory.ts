@@ -1,70 +1,81 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only
-)
+import { dbQuery, dbQueryOne } from "./db";
 
 // VERY SIMPLE MVP HEURISTICS
 export function extractMemoryCandidate(userMessage: string) {
   const triggers = [
-    'i prefer',
-    'i usually',
-    'i like',
-    'i love',
+    "i prefer",
+    "i usually",
+    "i like",
+    "i love",
     "i don't like",
-    'i hate',
-    'i am not into'
-  ]
+    "i hate",
+    "i am not into",
+  ];
 
-  const normalized = userMessage.toLowerCase()
+  const normalized = userMessage.toLowerCase();
 
-  if (!triggers.some(t => normalized.includes(t))) return null
+  if (!triggers.some((t) => normalized.includes(t))) return null;
 
   return {
-    memory_type: 'preference',
+    memory_type: "preference" as const,
     content: `User ${userMessage.trim()}`,
-    importance: 0.8
-  }
+    importance: 0.8,
+  };
 }
 
 export async function saveMemory({
   userId,
   companionId,
-  memory
+  memory,
 }: {
-  userId: string
-  companionId: string
+  userId: string;
+  companionId: string;
   memory: {
-    memory_type: 'fact' | 'preference' | 'boundary'
-    content: string
-    importance: number
-  }
+    memory_type: "fact" | "preference" | "boundary";
+    content: string;
+    importance: number;
+  };
 }) {
-  await supabase.from('companion_memories').insert({
-    user_id: userId,
-    companion_id: companionId,
-    memory_type: memory.memory_type,
-    content: memory.content,
-    importance: memory.importance
-  })
+  await dbQueryOne<{ id: string }>(
+    `
+      insert into companion_memories (
+        user_id,
+        companion_id,
+        memory_type,
+        content,
+        importance
+      )
+      values ($1, $2, $3, $4, $5)
+      returning id
+    `,
+    [
+      userId,
+      companionId,
+      memory.memory_type,
+      memory.content,
+      memory.importance,
+    ]
+  );
 }
 
 export async function loadMemories({
   userId,
-  companionId
+  companionId,
 }: {
-  userId: string
-  companionId: string
+  userId: string;
+  companionId: string;
 }) {
-  const { data } = await supabase
-    .from('companion_memories')
-    .select('content')
-    .eq('user_id', userId)
-    .eq('companion_id', companionId)
-    .order('importance', { ascending: false })
-    .order('created_at', { ascending: false })
-    .limit(5)
+  const data = await dbQuery<{ content: string }>(
+    `
+      select content
+      from companion_memories
+      where user_id = $1
+        and companion_id = $2
+      order by importance desc, created_at desc
+      limit 5
+    `,
+    [userId, companionId]
+  );
 
-  return data?.map(m => m.content) ?? []
+  return data.map((m) => m.content);
 }
