@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(status);
   } catch (err) {
-    console.error("User status error:", err);
+    console.error("[user/status] fatal error:", err);
     return NextResponse.json(
       { error: "Failed to load user status" },
       { status: 500 }

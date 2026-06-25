@@ -16,15 +16,19 @@ import { getCurrentUser } from "@/lib/auth";
 import {
   consumeChatCredit,
   getCafeStatus,
+  getChatHistory,
   markNominationGraceUsed,
   refundMessageCredit,
+  saveChatMessage,
 } from "@/lib/cafeDb";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-const ROUTE_VERSION = "chat-route-neon-revival-v1";
+const ROUTE_VERSION = "chat-route-neon-revival-v2-memory";
+const MEMORY_LIMIT = 30;
+const WELCOME_BACK_AFTER_HOURS = 6;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -103,8 +107,16 @@ export async function POST(
       );
     }
 
-    const statusBefore = await getCafeStatus(user.id, companionId);
+    const lastUserMessage = body.messages.at(-1);
 
+    if (!lastUserMessage || lastUserMessage.role !== "user") {
+      return NextResponse.json(
+        { error: "Invalid last user message" },
+        { status: 400, headers: resHeaders }
+      );
+    }
+
+    const statusBefore = await getCafeStatus(user.id, companionId);
     const unlimited = statusBefore.hasNomination;
     let nominationJustEnded = false;
 
@@ -113,8 +125,9 @@ export async function POST(
       const graceEndMs = statusBefore.nominationGraceEndsAt
         ? new Date(statusBefore.nominationGraceEndsAt).getTime()
         : expiresMs;
+      const nowMs = Date.now();
 
-      if (Date.now() > expiresMs && Date.now() <= graceEndMs) {
+      if (nowMs > expiresMs && nowMs <= graceEndMs) {
         nominationJustEnded = true;
         await markNominationGraceUsed(user.id, companionId);
       }
@@ -139,18 +152,58 @@ export async function POST(
       );
     }
 
+    const historyChrono = await getChatHistory(
+      user.id,
+      companionId,
+      MEMORY_LIMIT
+    );
+
+    let welcomeBackSystemHint: { role: "system"; content: string } | null =
+      null;
+
+    if (historyChrono.length > 0) {
+      const lastHist = historyChrono[historyChrono.length - 1];
+      const lastMs = new Date(lastHist.created_at).getTime();
+      const hoursAway = (Date.now() - lastMs) / (1000 * 60 * 60);
+
+      if (hoursAway >= WELCOME_BACK_AFTER_HOURS) {
+        welcomeBackSystemHint = {
+          role: "system",
+          content:
+            "The user is returning after time away. Start your next reply with a warm, natural welcome-back without mentioning timestamps, then continue normally.",
+        };
+      }
+    }
+
+    const openAiMessages: Array<
+      | { role: "system"; content: string }
+      | { role: "user" | "assistant"; content: string }
+    > = [
+      { role: "system", content: buildMenuContext() },
+      { role: "system", content: companion.systemPrompt },
+    ];
+
+    if (welcomeBackSystemHint) {
+      openAiMessages.push(welcomeBackSystemHint);
+    }
+
+    for (const message of historyChrono) {
+      openAiMessages.push({
+        role: message.role,
+        content: message.content,
+      });
+    }
+
+    openAiMessages.push({ role: "user", content: lastUserMessage.content });
+
     let reply: string;
 
     try {
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         temperature: 0.9,
-        max_tokens: 140,
-        messages: [
-          { role: "system", content: buildMenuContext() },
-          { role: "system", content: companion.systemPrompt },
-          ...body.messages,
-        ],
+        max_tokens: 160,
+        messages: openAiMessages,
       });
 
       reply =
@@ -164,6 +217,24 @@ export async function POST(
 
       throw err;
     }
+
+    await saveChatMessage({
+      userId: user.id,
+      companionId,
+      role: "user",
+      content: lastUserMessage.content,
+    }).catch((err) => {
+      console.error("[chat_messages] user insert failed:", err);
+    });
+
+    await saveChatMessage({
+      userId: user.id,
+      companionId,
+      role: "assistant",
+      content: reply,
+    }).catch((err) => {
+      console.error("[chat_messages] assistant insert failed:", err);
+    });
 
     const statusAfter = await getCafeStatus(user.id, companionId);
 

@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { geistSans, geistMono } from "../lib/fonts";
 import AuthBootstrap from "../components/AuthBootstrap";
-import Footer from "@/components/Footer";
+import { Analytics } from "@vercel/analytics/react";
+import Footer from "../components/Footer";
 
 export const metadata: Metadata = {
   title: "Kemono Cafe",
@@ -21,6 +22,7 @@ export default function RootLayout({
         <AuthBootstrap />
         {children}
         <Footer />
+        <Analytics />
       </body>
     </html>
   );

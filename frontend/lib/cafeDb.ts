@@ -26,6 +26,13 @@ type NominationRow = {
   grace_used: boolean;
 };
 
+export type ChatHistoryMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string | Date;
+};
+
 function toDateKey(value: string | Date | null) {
   if (!value) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -315,3 +322,44 @@ export async function consumeChatCredit(userId: string) {
   });
 }
 
+export async function getChatHistory(
+  userId: string,
+  companionId: string,
+  limit = 30
+) {
+  const safeLimit = Math.max(1, Math.min(limit, 100));
+  const rows = await dbQuery<ChatHistoryMessage>(
+    `
+      select id, role, content, created_at
+      from chat_messages
+      where user_id = $1
+        and companion_id = $2
+      order by created_at desc
+      limit $3
+    `,
+    [userId, companionId, safeLimit]
+  );
+
+  return rows.reverse();
+}
+
+export async function saveChatMessage({
+  userId,
+  companionId,
+  role,
+  content,
+}: {
+  userId: string;
+  companionId: string;
+  role: "user" | "assistant";
+  content: string;
+}) {
+  await dbQueryOne<{ id: string }>(
+    `
+      insert into chat_messages (user_id, companion_id, role, content)
+      values ($1, $2, $3, $4)
+      returning id
+    `,
+    [userId, companionId, role, content]
+  );
+}

@@ -19,7 +19,7 @@ export default function NominationBanner({
         rounded-xl
         px-4 py-3
 
-        bg-gradient-to-r
+        bg-linear-to-r
         from-[rgba(56,189,248,0.12)]
         to-[rgba(236,72,153,0.12)]
 
@@ -44,7 +44,7 @@ export default function NominationBanner({
           text-xs font-semibold
           text-white
 
-          bg-gradient-to-b
+          bg-linear-to-b
           from-pink-400
           to-pink-500
 
