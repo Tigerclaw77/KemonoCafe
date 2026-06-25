@@ -2,7 +2,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
 import {
   normalizeDailyFree,
   isApiError,
@@ -64,11 +63,6 @@ type UseChatSessionParams = {
   };
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
 };
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export function useChatSession({
   userId,
@@ -151,10 +145,11 @@ export function useChatSession({
           return;
         }
 
-        const { data, error } = await supabase.auth.getUser();
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        const data: { user?: { id?: string } | null } = await res.json();
         if (cancelled) return;
 
-        const nextUserId = error || !data?.user ? null : data.user.id;
+        const nextUserId = data?.user?.id ?? null;
 
         // LOGOUT RESET — event driven
         if (sessionUserId && !nextUserId) {
@@ -198,7 +193,7 @@ export function useChatSession({
         const res = await fetch("/api/user/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: effectiveUserId }),
+          body: JSON.stringify({ companionId }),
         });
 
         const data = await safeReadResponse<UserStatusResponse>(res);
@@ -223,7 +218,7 @@ export function useChatSession({
     return () => {
       aborted = true;
     };
-  }, [authChecked, effectiveUserId]);
+  }, [authChecked, effectiveUserId, companionId]);
 
   // ── Nomination warning injection ─────────────────────────
   useEffect(() => {

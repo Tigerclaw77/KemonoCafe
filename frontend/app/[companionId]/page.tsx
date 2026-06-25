@@ -2,7 +2,7 @@
 
 import { notFound } from "next/navigation";
 
-import CafeHeader from "@/components/CafeHeader";
+import CafeHeader from "@/products/kemonoCafe/CafeHeader";
 import CompanionChat from "../../components/CompanionChat";
 import CompanionProfileHero from "../../components/CompanionProfileHero";
 

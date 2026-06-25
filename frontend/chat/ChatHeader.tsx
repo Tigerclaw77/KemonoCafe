@@ -1,6 +1,6 @@
 "use client";
 
-import CafeMenuButton from "@/components/CafeMenuButton";
+import CafeMenuButton from "@/products/kemonoCafe/CafeMenuButton";
 
 interface ChatHeaderProps {
   companionName: string;

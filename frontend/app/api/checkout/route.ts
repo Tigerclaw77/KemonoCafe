@@ -1,10 +1,13 @@
 import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 
 // Stripe client – cast apiVersion to avoid TS complaining
 const stripe = new Stripe((process.env.STRIPE_SECRET_KEY || "") as string, {
   apiVersion: "2024-06-20" as Stripe.LatestApiVersion,
 });
+
+export const runtime = "nodejs";
 
 // Base config for each MENU item type (bankable messages)
 const ITEM_CONFIG = {
@@ -28,7 +31,7 @@ type ItemKey = keyof typeof ITEM_CONFIG;
 
 // Multi-item cart body (menu items + optional nomination toggle)
 type MultiItemBody = {
-  userId: string;
+  userId?: string;
   companionId: string;
   items: { itemType: string; quantity: number }[];
   hasFullCourse?: boolean;
@@ -37,7 +40,7 @@ type MultiItemBody = {
 
 // Legacy/single item body (still supported)
 type SingleItemBody = {
-  userId: string;
+  userId?: string;
   companionId: string;
   itemType: ItemKey | "nomination";
 };
@@ -47,10 +50,10 @@ type CheckoutBody = MultiItemBody | SingleItemBody;
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as CheckoutBody;
+    const user = await getCurrentUser();
 
-    const userId = body.userId;
-    if (!userId) {
-      return NextResponse.json({ error: "Missing userId" }, { status: 400 });
+    if (!user) {
+      return NextResponse.json({ error: "Please log in first." }, { status: 401 });
     }
 
     const companionId = "companionId" in body ? body.companionId : undefined;
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
     const metadata: Record<string, string> = {
-      userId,
+      userId: user.id,
       companionId,
     };
 
@@ -188,7 +191,7 @@ export async function POST(req: NextRequest) {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: lineItems,
-      client_reference_id: userId,
+      client_reference_id: user.id,
       metadata,
       success_url: `${origin}/${encodeURIComponent(
         companionId

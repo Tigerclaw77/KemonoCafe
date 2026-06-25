@@ -3,7 +3,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "../lib/supabaseClient";
 
 type UserInfo = {
   email: string | null;
@@ -11,42 +10,34 @@ type UserInfo = {
 
 export default function HeaderAuthStatus() {
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let ignore = false;
 
     async function loadUser() {
       try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error) {
-          console.warn("supabase.auth.getUser error:", error);
-        }
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        const data: { user?: { email?: string | null } | null } =
+          await res.json();
+
         if (!ignore) {
           setUser(data.user ? { email: data.user.email ?? null } : null);
         }
-      } finally {
-        if (!ignore) setLoading(false);
+      } catch {
+        if (!ignore) setUser(null);
       }
     }
 
     loadUser();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? { email: session.user.email ?? null } : null);
-    });
-
     return () => {
       ignore = true;
-      subscription.unsubscribe();
     };
   }, []);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    // onAuthStateChange will clear user state
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
   };
 
   // While loading, just show the guest UI – it'll flip if we detect a user

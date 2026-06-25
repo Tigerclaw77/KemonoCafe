@@ -1,6 +1,7 @@
 // frontend/app/api/nominate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { getCurrentUser } from "@/lib/auth";
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const nominationPriceId = process.env.STRIPE_PRICE_NOMINATION;
@@ -8,6 +9,8 @@ const nominationPriceId = process.env.STRIPE_PRICE_NOMINATION;
 const stripe = new Stripe(stripeSecretKey || "", {
   apiVersion: "2024-06-20" as Stripe.LatestApiVersion,
 });
+
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,16 +32,19 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const userId = body.userId as string | undefined;
     const companionId = body.companionId as string | undefined;
+    const user = await getCurrentUser();
 
-    if (!userId || !companionId) {
-      console.error("[nominate] Missing userId or companionId", {
-        userId,
+    if (!user) {
+      return NextResponse.json({ error: "Please log in first." }, { status: 401 });
+    }
+
+    if (!companionId) {
+      console.error("[nominate] Missing companionId", {
         companionId,
       });
       return NextResponse.json(
-        { error: "Missing userId or companionId" },
+        { error: "Missing companionId" },
         { status: 400 }
       );
     }
@@ -72,7 +78,7 @@ const cancelUrl = `${baseUrl}/${encodeURIComponent(
       ],
       metadata: {
         type: "nomination",
-        userId,
+        userId: user.id,
         companionId,
       },
       success_url: successUrl,

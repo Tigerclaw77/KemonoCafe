@@ -1,16 +1,14 @@
 // frontend/app/api/stripe/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
+import { findUserById } from "@/lib/auth";
+import { incrementMessages, setNomination } from "@/lib/cafeDb";
+
+export const runtime = "nodejs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-11-17.clover",
 });
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const MESSAGE_VALUES: Record<string, number> = {
   drink: 10,
@@ -20,24 +18,12 @@ const MESSAGE_VALUES: Record<string, number> = {
   full_course: 110,
 };
 
-async function resolveAppUserId(maybeId: string) {
-  // 1) If metadata userId is already public.users.id
-  const { data: userRow } = await supabase
-    .from("users")
-    .select("id")
-    .eq("id", maybeId)
-    .maybeSingle();
-
-  if (userRow?.id) return userRow.id;
-
-  // 2) Otherwise treat it as auth_user_id
-  const { data: userRow2 } = await supabase
-    .from("users")
-    .select("id")
-    .eq("auth_user_id", maybeId)
-    .maybeSingle();
-
-  return userRow2?.id ?? null;
+function getNominationExpiry() {
+  const now = new Date();
+  const expires = new Date(now);
+  expires.setHours(3, 0, 0, 0);
+  if (now.getHours() >= 3) expires.setDate(expires.getDate() + 1);
+  return expires;
 }
 
 export async function POST(req: NextRequest) {
@@ -66,46 +52,29 @@ export async function POST(req: NextRequest) {
 
   const session = event.data.object as Stripe.Checkout.Session;
 
-  const rawUserId = session.metadata?.userId; // may be auth id OR app users.id
+  const rawUserId = session.metadata?.userId;
   const companionId = session.metadata?.companionId ?? null;
   const purchaseType = session.metadata?.type;
-
-  console.log("WEBHOOK METADATA:", session.metadata);
+  const hasNomination =
+    purchaseType === "nomination" || session.metadata?.nomination === "true";
 
   if (!rawUserId) return NextResponse.json({ received: true });
 
-  const appUserId = await resolveAppUserId(rawUserId);
+  const user = await findUserById(rawUserId);
 
-  console.log("rawUserId:", rawUserId);
-  console.log("appUserId:", appUserId);
-
-  if (!appUserId) {
-    console.error("No matching public.users row for userId:", rawUserId);
+  if (!user) {
+    console.error("No matching users row for userId:", rawUserId);
     return NextResponse.json({ received: true });
   }
 
-  // ───── Nomination ─────
-  if (purchaseType === "nomination") {
-    const now = new Date();
-    const expires = new Date(now);
-    expires.setHours(3, 0, 0, 0);
-    if (now.getHours() >= 3) expires.setDate(expires.getDate() + 1);
-
-    const { error } = await supabase.from("nominations").upsert(
-      {
-        user_id: appUserId,
-        companion_id: companionId,
-        expires_at: expires.toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
-
-    if (error) console.error("Nomination upsert error:", error);
-
-    return NextResponse.json({ received: true });
+  if (hasNomination && companionId) {
+    await setNomination({
+      userId: user.id,
+      companionId,
+      expiresAt: getNominationExpiry(),
+    });
   }
 
-  // ───── Messages ─────
   const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
   let messagesToAdd = 0;
 
@@ -121,15 +90,8 @@ export async function POST(req: NextRequest) {
     if (desc.includes("dessert")) messagesToAdd += MESSAGE_VALUES.dessert;
   }
 
-  console.log("messagesToAdd:", messagesToAdd);
-
   if (messagesToAdd > 0) {
-    const { error } = await supabase.rpc("increment_messages", {
-      p_user_id: appUserId,
-      p_amount: messagesToAdd,
-    });
-
-    if (error) console.error("increment_messages RPC error:", error);
+    await incrementMessages(user.id, messagesToAdd);
   }
 
   return NextResponse.json({ received: true });
